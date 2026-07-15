@@ -1,0 +1,14 @@
+# Gradle
+.gradle/
+build/
+app/build/
+.kotlin/
+
+# Machine-specific (SDK path, JDK path live in gradle.properties/local.properties)
+local.properties
+
+# Signing key stays local — regenerate with keytool if lost (see README)
+routines.keystore
+
+# Outputs
+*.apk
