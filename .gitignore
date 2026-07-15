@@ -12,3 +12,6 @@ routines.keystore
 
 # Outputs
 *.apk
+
+# Machine-specific truststore for Avast HTTPS scanning (see gradle.properties)
+build-truststore.jks
