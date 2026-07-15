@@ -355,8 +355,8 @@ private fun PercentSlider(label: String, value: Int, onChange: (Int) -> Unit) {
 }
 
 @Composable
-private fun NumField(label: String, value: String, onChange: (String) -> Unit,
-                     number: Boolean = false) {
+private fun NumField(label: String, value: String, number: Boolean = false,
+                     onChange: (String) -> Unit) {
     OutlinedTextField(value = value, onValueChange = onChange, label = { Text(label) }, singleLine = true,
         keyboardOptions = KeyboardOptions(
             keyboardType = if (number) KeyboardType.Number else KeyboardType.Text),
@@ -432,9 +432,9 @@ private fun TriggerConfig(kind: TriggerKind, existing: Trigger?, onDismiss: () -
             }) {
                 OnOff("When you", enter, { enter = it }, "Arrive", "Leave")
                 NumField("Place name", place) { place = it }
-                NumField("Latitude", lat, { lat = it }, number = true)
-                NumField("Longitude", lng, { lng = it }, number = true)
-                NumField("Radius (metres)", radius, { radius = it }, number = true)
+                NumField("Latitude", lat, number = true) { lat = it }
+                NumField("Longitude", lng, number = true) { lng = it }
+                NumField("Radius (metres)", radius, number = true) { radius = it }
                 Text("Tip: long-press a spot in Google Maps to copy its latitude, longitude.",
                     fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
