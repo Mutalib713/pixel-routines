@@ -1,109 +1,365 @@
 package com.mosman.routines
 
-import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
+import java.time.DayOfWeek
+import java.time.LocalTime
 import java.time.ZonedDateTime
+import java.util.Locale
 
-enum class RingerAction { NO_CHANGE, SOUND, VIBRATE, SILENT }
-enum class Toggle { NO_CHANGE, ON, OFF }
+// ============================================================================
+//  Enums
+// ============================================================================
 
-fun RingerAction.label(): String = when (this) {
-    RingerAction.NO_CHANGE -> "Keep"
-    RingerAction.SOUND -> "Sound"
-    RingerAction.VIBRATE -> "Vibrate"
-    RingerAction.SILENT -> "Silent"
+enum class RingerMode { SILENT, VIBRATE, SOUND;
+    fun label() = when (this) { SILENT -> "Silent"; VIBRATE -> "Vibrate"; SOUND -> "Sound" }
 }
+
+enum class StreamType { MEDIA, RING, NOTIFICATION, ALARM, CALL;
+    fun label() = when (this) {
+        MEDIA -> "Media"; RING -> "Ring"; NOTIFICATION -> "Notification"; ALARM -> "Alarm"; CALL -> "Call"
+    }
+}
+
+/** How multiple triggers combine. */
+enum class Match { ANY, ALL;
+    fun label() = if (this == ANY) "Any of these" else "All of these"
+}
+
+// ============================================================================
+//  Triggers  (the "IF")
+// ============================================================================
+
+sealed class Trigger {
+    abstract fun describe(): String
+    abstract fun icon(): String   // emoji shown in pickers/summaries
+    abstract fun toJson(): JSONObject
+
+    /** Time of day on selected weekdays (ISO 1=Mon..7=Sun). */
+    data class TimeOfDay(val hour: Int, val minute: Int, val days: Set<Int>) : Trigger() {
+        override fun icon() = "⏰"
+        override fun describe(): String {
+            val t = LocalTime.of(hour, minute).toString()
+            return "At $t on ${daysLabel(days)}"
+        }
+        override fun toJson() = JSONObject().put("t", "time").put("h", hour).put("m", minute)
+            .put("days", JSONArray(days.toList()))
+    }
+
+    /** Battery crosses a level. */
+    data class Battery(val below: Boolean, val level: Int) : Trigger() {
+        override fun icon() = "🔋"
+        override fun describe() = "Battery ${if (below) "drops below" else "rises above"} $level%"
+        override fun toJson() = JSONObject().put("t", "battery").put("below", below).put("level", level)
+    }
+
+    /** Charger connected / disconnected. */
+    data class Power(val connected: Boolean) : Trigger() {
+        override fun icon() = "🔌"
+        override fun describe() = if (connected) "Charger connected" else "Charger disconnected"
+        override fun toJson() = JSONObject().put("t", "power").put("on", connected)
+    }
+
+    /** Wired headphones plugged / unplugged. */
+    data class Headset(val connected: Boolean) : Trigger() {
+        override fun icon() = "🎧"
+        override fun describe() = if (connected) "Headphones plugged in" else "Headphones unplugged"
+        override fun toJson() = JSONObject().put("t", "headset").put("on", connected)
+    }
+
+    /** Bluetooth device connects / disconnects. name == null → any device. */
+    data class Bluetooth(val connected: Boolean, val deviceName: String?) : Trigger() {
+        override fun icon() = "🔵"
+        override fun describe(): String {
+            val who = deviceName ?: "any device"
+            return "Bluetooth $who ${if (connected) "connects" else "disconnects"}"
+        }
+        override fun toJson() = JSONObject().put("t", "bt").put("on", connected)
+            .put("name", deviceName ?: JSONObject.NULL)
+    }
+
+    /** Joins / leaves a Wi-Fi network. ssid == null → any network. */
+    data class Wifi(val connected: Boolean, val ssid: String?) : Trigger() {
+        override fun icon() = "📶"
+        override fun describe(): String {
+            val net = ssid ?: "any network"
+            return "Wi-Fi $net ${if (connected) "connects" else "disconnects"}"
+        }
+        override fun toJson() = JSONObject().put("t", "wifi").put("on", connected)
+            .put("ssid", ssid ?: JSONObject.NULL)
+    }
+
+    /** Enter / exit a place (geofence). */
+    data class Location(val enter: Boolean, val lat: Double, val lng: Double,
+                        val radius: Float, val place: String) : Trigger() {
+        override fun icon() = "📍"
+        override fun describe() = "${if (enter) "Arrive at" else "Leave"} $place"
+        override fun toJson() = JSONObject().put("t", "loc").put("enter", enter)
+            .put("lat", lat).put("lng", lng).put("radius", radius).put("place", place)
+    }
+
+    /** Screen turns on / off. */
+    data class Screen(val on: Boolean) : Trigger() {
+        override fun icon() = "📱"
+        override fun describe() = if (on) "Screen turns on" else "Screen turns off"
+        override fun toJson() = JSONObject().put("t", "screen").put("on", on)
+    }
+
+    /** Airplane mode turns on / off. */
+    data class Airplane(val on: Boolean) : Trigger() {
+        override fun icon() = "✈️"
+        override fun describe() = "Airplane mode turns ${if (on) "on" else "off"}"
+        override fun toJson() = JSONObject().put("t", "air").put("on", on)
+    }
+
+    companion object {
+        fun fromJson(o: JSONObject): Trigger = when (o.getString("t")) {
+            "time" -> TimeOfDay(o.getInt("h"), o.getInt("m"), o.getJSONArray("days").toIntSet())
+            "battery" -> Battery(o.getBoolean("below"), o.getInt("level"))
+            "power" -> Power(o.getBoolean("on"))
+            "headset" -> Headset(o.getBoolean("on"))
+            "bt" -> Bluetooth(o.getBoolean("on"), o.optNullString("name"))
+            "wifi" -> Wifi(o.getBoolean("on"), o.optNullString("ssid"))
+            "loc" -> Location(o.getBoolean("enter"), o.getDouble("lat"), o.getDouble("lng"),
+                o.getDouble("radius").toFloat(), o.getString("place"))
+            "screen" -> Screen(o.getBoolean("on"))
+            "air" -> Airplane(o.getBoolean("on"))
+            else -> Screen(true)
+        }
+    }
+}
+
+// ============================================================================
+//  Conditions  (extra "AND ... is currently true" gates)
+// ============================================================================
+
+sealed class Condition {
+    abstract fun describe(): String
+    abstract fun toJson(): JSONObject
+
+    data class OnDays(val days: Set<Int>) : Condition() {
+        override fun describe() = "only on ${daysLabel(days)}"
+        override fun toJson() = JSONObject().put("c", "days").put("days", JSONArray(days.toList()))
+    }
+    data class BetweenHours(val startH: Int, val startM: Int, val endH: Int, val endM: Int) : Condition() {
+        override fun describe() =
+            "between ${LocalTime.of(startH, startM)} and ${LocalTime.of(endH, endM)}"
+        override fun toJson() = JSONObject().put("c", "window")
+            .put("sh", startH).put("sm", startM).put("eh", endH).put("em", endM)
+    }
+    data class BatteryUnder(val level: Int) : Condition() {
+        override fun describe() = "battery under $level%"
+        override fun toJson() = JSONObject().put("c", "batt").put("level", level)
+    }
+    data class WhileCharging(val charging: Boolean) : Condition() {
+        override fun describe() = if (charging) "while charging" else "while on battery"
+        override fun toJson() = JSONObject().put("c", "charging").put("on", charging)
+    }
+
+    companion object {
+        fun fromJson(o: JSONObject): Condition = when (o.getString("c")) {
+            "days" -> OnDays(o.getJSONArray("days").toIntSet())
+            "window" -> BetweenHours(o.getInt("sh"), o.getInt("sm"), o.getInt("eh"), o.getInt("em"))
+            "batt" -> BatteryUnder(o.getInt("level"))
+            "charging" -> WhileCharging(o.getBoolean("on"))
+            else -> OnDays((1..7).toSet())
+        }
+    }
+}
+
+// ============================================================================
+//  Actions  (the "THEN")
+// ============================================================================
+
+/** Access a given action needs, so the UI can show a status chip. */
+enum class Access { NONE, DND, WRITE_SETTINGS, SECURE_SETTINGS, SHIZUKU }
+
+sealed class Action {
+    abstract fun describe(): String
+    abstract fun icon(): String
+    abstract fun access(): Access
+    abstract fun toJson(): JSONObject
+
+    data class Ringer(val mode: RingerMode) : Action() {
+        override fun icon() = "🔕"
+        override fun describe() = "Set ringer to ${mode.label().lowercase()}"
+        override fun access() = Access.DND
+        override fun toJson() = JSONObject().put("a", "ringer").put("mode", mode.name)
+    }
+    data class Dnd(val on: Boolean) : Action() {
+        override fun icon() = "🌙"
+        override fun describe() = "Turn Do Not Disturb ${onOff(on)}"
+        override fun access() = Access.DND
+        override fun toJson() = JSONObject().put("a", "dnd").put("on", on)
+    }
+    data class Volume(val stream: StreamType, val percent: Int) : Action() {
+        override fun icon() = "🔊"
+        override fun describe() = "${stream.label()} volume to $percent%"
+        override fun access() = if (stream == StreamType.RING || stream == StreamType.NOTIFICATION)
+            Access.DND else Access.NONE
+        override fun toJson() = JSONObject().put("a", "vol").put("stream", stream.name).put("pct", percent)
+    }
+    data class Brightness(val percent: Int) : Action() {
+        override fun icon() = "💡"
+        override fun describe() = "Brightness to $percent%"
+        override fun access() = Access.WRITE_SETTINGS
+        override fun toJson() = JSONObject().put("a", "bright").put("pct", percent)
+    }
+    data class AutoRotate(val on: Boolean) : Action() {
+        override fun icon() = "🔄"
+        override fun describe() = "Auto-rotate ${onOff(on)}"
+        override fun access() = Access.WRITE_SETTINGS
+        override fun toJson() = JSONObject().put("a", "rotate").put("on", on)
+    }
+    data class DarkTheme(val on: Boolean) : Action() {
+        override fun icon() = "🌑"
+        override fun describe() = "Dark theme ${onOff(on)}"
+        override fun access() = Access.SECURE_SETTINGS
+        override fun toJson() = JSONObject().put("a", "dark").put("on", on)
+    }
+    data class BatterySaver(val on: Boolean) : Action() {
+        override fun icon() = "🪫"
+        override fun describe() = "Battery Saver ${onOff(on)}"
+        override fun access() = Access.SECURE_SETTINGS
+        override fun toJson() = JSONObject().put("a", "saver").put("on", on)
+    }
+    data class WifiToggle(val on: Boolean) : Action() {
+        override fun icon() = "📶"
+        override fun describe() = "Turn Wi-Fi ${onOff(on)}"
+        override fun access() = Access.SHIZUKU
+        override fun toJson() = JSONObject().put("a", "wifi").put("on", on)
+    }
+    data class BluetoothToggle(val on: Boolean) : Action() {
+        override fun icon() = "🔵"
+        override fun describe() = "Turn Bluetooth ${onOff(on)}"
+        override fun access() = Access.SHIZUKU
+        override fun toJson() = JSONObject().put("a", "bt").put("on", on)
+    }
+    data class AirplaneToggle(val on: Boolean) : Action() {
+        override fun icon() = "✈️"
+        override fun describe() = "Turn Airplane mode ${onOff(on)}"
+        override fun access() = Access.SHIZUKU
+        override fun toJson() = JSONObject().put("a", "air").put("on", on)
+    }
+    data class LaunchApp(val pkg: String, val label: String) : Action() {
+        override fun icon() = "📲"
+        override fun describe() = "Open $label"
+        override fun access() = Access.NONE
+        override fun toJson() = JSONObject().put("a", "app").put("pkg", pkg).put("label", label)
+    }
+    data class Flashlight(val on: Boolean) : Action() {
+        override fun icon() = "🔦"
+        override fun describe() = "Flashlight ${onOff(on)}"
+        override fun access() = Access.NONE
+        override fun toJson() = JSONObject().put("a", "flash").put("on", on)
+    }
+    data class Notify(val title: String, val text: String) : Action() {
+        override fun icon() = "🔔"
+        override fun describe() = "Notify: $title"
+        override fun access() = Access.NONE
+        override fun toJson() = JSONObject().put("a", "notify").put("title", title).put("text", text)
+    }
+
+    companion object {
+        fun fromJson(o: JSONObject): Action = when (o.getString("a")) {
+            "ringer" -> Ringer(RingerMode.valueOf(o.getString("mode")))
+            "dnd" -> Dnd(o.getBoolean("on"))
+            "vol" -> Volume(StreamType.valueOf(o.getString("stream")), o.getInt("pct"))
+            "bright" -> Brightness(o.getInt("pct"))
+            "rotate" -> AutoRotate(o.getBoolean("on"))
+            "dark" -> DarkTheme(o.getBoolean("on"))
+            "saver" -> BatterySaver(o.getBoolean("on"))
+            "wifi" -> WifiToggle(o.getBoolean("on"))
+            "bt" -> BluetoothToggle(o.getBoolean("on"))
+            "air" -> AirplaneToggle(o.getBoolean("on"))
+            "app" -> LaunchApp(o.getString("pkg"), o.getString("label"))
+            "flash" -> Flashlight(o.getBoolean("on"))
+            "notify" -> Notify(o.getString("title"), o.optString("text"))
+            else -> Notify("Routine", "")
+        }
+    }
+}
+
+// ============================================================================
+//  Routine
+// ============================================================================
 
 data class Routine(
     val id: Long,
     val name: String,
+    val emoji: String = "✨",
     val enabled: Boolean = true,
-    val hour: Int,
-    val minute: Int,
-    val days: Set<Int>, // ISO: 1 = Monday .. 7 = Sunday
-    val ringer: RingerAction = RingerAction.NO_CHANGE,
-    val dnd: Toggle = Toggle.NO_CHANGE,
-    val mediaVol: Int? = null,   // 0..100 or null = don't touch
-    val ringVol: Int? = null,
-    val alarmVol: Int? = null,
-    val brightness: Int? = null, // 0..100 or null
-    val autoRotate: Toggle = Toggle.NO_CHANGE,
+    val match: Match = Match.ANY,
+    val triggers: List<Trigger> = emptyList(),
+    val conditions: List<Condition> = emptyList(),
+    val actions: List<Action> = emptyList(),
 ) {
-    fun hasAnyAction(): Boolean =
-        ringer != RingerAction.NO_CHANGE || dnd != Toggle.NO_CHANGE ||
-            mediaVol != null || ringVol != null || alarmVol != null ||
-            brightness != null || autoRotate != Toggle.NO_CHANGE
+    val isValid get() = triggers.isNotEmpty() && actions.isNotEmpty()
 
-    fun nextTrigger(from: ZonedDateTime = ZonedDateTime.now()): ZonedDateTime? {
-        if (days.isEmpty()) return null
-        for (d in 0..7L) {
-            val date = from.toLocalDate().plusDays(d)
-            val cand = date.atTime(hour, minute).atZone(from.zone)
-            if (cand.isAfter(from) && days.contains(date.dayOfWeek.value)) return cand
-        }
-        return null
-    }
+    fun ifSummary(): String =
+        if (triggers.isEmpty()) "No trigger yet"
+        else triggers.joinToString(
+            separator = if (match == Match.ALL) "  and  " else "  or  "
+        ) { it.describe() }
 
-    fun summary(): String {
-        val parts = mutableListOf<String>()
-        if (ringer != RingerAction.NO_CHANGE) parts += "Ringer " + ringer.label().lowercase()
-        when (dnd) { Toggle.ON -> parts += "DND on"; Toggle.OFF -> parts += "DND off"; else -> {} }
-        mediaVol?.let { parts += "Media $it%" }
-        ringVol?.let { parts += "Ring $it%" }
-        alarmVol?.let { parts += "Alarm $it%" }
-        brightness?.let { parts += "Brightness $it%" }
-        when (autoRotate) { Toggle.ON -> parts += "Rotate on"; Toggle.OFF -> parts += "Rotate off"; else -> {} }
-        return if (parts.isEmpty()) "No actions" else parts.joinToString(" · ")
-    }
+    fun thenSummary(): String =
+        if (actions.isEmpty()) "No actions yet" else actions.joinToString(", ") { it.describe() }
 
     fun toJson(): JSONObject = JSONObject().apply {
-        put("id", id); put("name", name); put("enabled", enabled)
-        put("hour", hour); put("minute", minute)
-        put("days", JSONArray(days.toList()))
-        put("ringer", ringer.name); put("dnd", dnd.name)
-        put("mediaVol", mediaVol ?: -1); put("ringVol", ringVol ?: -1); put("alarmVol", alarmVol ?: -1)
-        put("brightness", brightness ?: -1)
-        put("autoRotate", autoRotate.name)
+        put("id", id); put("name", name); put("emoji", emoji); put("enabled", enabled)
+        put("match", match.name)
+        put("triggers", JSONArray().apply { triggers.forEach { put(it.toJson()) } })
+        put("conditions", JSONArray().apply { conditions.forEach { put(it.toJson()) } })
+        put("actions", JSONArray().apply { actions.forEach { put(it.toJson()) } })
     }
 
     companion object {
-        fun fromJson(o: JSONObject): Routine {
-            val daysArr = o.optJSONArray("days") ?: JSONArray()
-            val days = buildSet { for (i in 0 until daysArr.length()) add(daysArr.getInt(i)) }
-            fun opt(k: String): Int? = o.optInt(k, -1).let { if (it < 0) null else it }
-            return Routine(
-                id = o.getLong("id"),
-                name = o.optString("name", "Routine"),
-                enabled = o.optBoolean("enabled", true),
-                hour = o.optInt("hour", 8),
-                minute = o.optInt("minute", 0),
-                days = days,
-                ringer = runCatching { RingerAction.valueOf(o.optString("ringer")) }.getOrDefault(RingerAction.NO_CHANGE),
-                dnd = runCatching { Toggle.valueOf(o.optString("dnd")) }.getOrDefault(Toggle.NO_CHANGE),
-                mediaVol = opt("mediaVol"), ringVol = opt("ringVol"), alarmVol = opt("alarmVol"),
-                brightness = opt("brightness"),
-                autoRotate = runCatching { Toggle.valueOf(o.optString("autoRotate")) }.getOrDefault(Toggle.NO_CHANGE),
-            )
-        }
+        fun fromJson(o: JSONObject) = Routine(
+            id = o.getLong("id"),
+            name = o.optString("name", "Routine"),
+            emoji = o.optString("emoji", "✨"),
+            enabled = o.optBoolean("enabled", true),
+            match = runCatching { Match.valueOf(o.optString("match")) }.getOrDefault(Match.ANY),
+            triggers = o.optJSONArray("triggers").items { Trigger.fromJson(it) },
+            conditions = o.optJSONArray("conditions").items { Condition.fromJson(it) },
+            actions = o.optJSONArray("actions").items { Action.fromJson(it) },
+        )
+
+        fun new() = Routine(id = System.currentTimeMillis(), name = "", emoji = "✨")
     }
 }
 
-object Store {
-    private const val PREF = "routines"
-    private const val KEY = "list"
+// ============================================================================
+//  Helpers
+// ============================================================================
 
-    fun load(ctx: Context): List<Routine> {
-        val raw = ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).getString(KEY, null) ?: return emptyList()
-        return runCatching {
-            val arr = JSONArray(raw)
-            (0 until arr.length()).map { Routine.fromJson(arr.getJSONObject(it)) }
-        }.getOrDefault(emptyList())
+fun daysLabel(days: Set<Int>): String = when {
+    days.isEmpty() -> "no days"
+    days.size == 7 -> "every day"
+    days == setOf(1, 2, 3, 4, 5) -> "weekdays"
+    days == setOf(6, 7) -> "weekends"
+    else -> days.sorted().joinToString(", ") {
+        DayOfWeek.of(it).getDisplayName(java.time.format.TextStyle.SHORT, Locale.getDefault())
     }
+}
 
-    fun save(ctx: Context, list: List<Routine>) {
-        val arr = JSONArray()
-        list.forEach { arr.put(it.toJson()) }
-        ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().putString(KEY, arr.toString()).apply()
+private fun onOff(on: Boolean) = if (on) "on" else "off"
+
+private fun JSONArray.toIntSet(): Set<Int> = buildSet { for (i in 0 until length()) add(getInt(i)) }
+
+private inline fun <T> JSONArray?.items(f: (JSONObject) -> T): List<T> {
+    if (this == null) return emptyList()
+    return (0 until length()).map { f(getJSONObject(it)) }
+}
+private fun JSONObject.optNullString(key: String): String? =
+    if (!has(key) || isNull(key)) null else optString(key).ifBlank { null }
+
+fun nextTimeTrigger(t: Trigger.TimeOfDay, from: ZonedDateTime = ZonedDateTime.now()): ZonedDateTime? {
+    if (t.days.isEmpty()) return null
+    for (d in 0..7L) {
+        val date = from.toLocalDate().plusDays(d)
+        val cand = date.atTime(t.hour, t.minute).atZone(from.zone)
+        if (cand.isAfter(from) && t.days.contains(date.dayOfWeek.value)) return cand
     }
+    return null
 }

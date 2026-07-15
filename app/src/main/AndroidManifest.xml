@@ -1,23 +1,40 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Exact-time triggers: auto-granted on Android 12 (below), auto-granted via USE_EXACT_ALARM on 13+ -->
-    <uses-permission
-        android:name="android.permission.SCHEDULE_EXACT_ALARM"
-        android:maxSdkVersion="32" />
+    <!-- Exact-time triggers -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
 
-    <!-- Re-arm alarms after reboot / time change / app update -->
+    <!-- Re-arm after reboot / update / clock change -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
-    <!-- "Routine ran" confirmations -->
+    <!-- Notifications -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- Ringer mode + Do Not Disturb (user grants in special app access) -->
+    <!-- Ringer + Do Not Disturb -->
     <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
 
-    <!-- Brightness / auto-rotate (user grants "Modify system settings") -->
+    <!-- Brightness / auto-rotate -->
     <uses-permission android:name="android.permission.WRITE_SETTINGS" />
+
+    <!-- Dark theme / Battery Saver (granted once over ADB) -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
+
+    <!-- Live event triggers run in a foreground service -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
+    <!-- Location triggers (geofence) -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+
+    <!-- Bluetooth device names, Wi-Fi network names -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <application
         android:label="@string/app_name"
@@ -36,21 +53,39 @@
             </intent-filter>
         </activity>
 
-        <!-- Fired by AlarmManager when a routine is due -->
-        <receiver
-            android:name=".RoutineFireReceiver"
-            android:exported="false" />
+        <service
+            android:name=".EventService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="device_automation" />
+        </service>
 
-        <!-- Re-arms all alarms; these actions are protected system broadcasts -->
-        <receiver
-            android:name=".BootReceiver"
-            android:exported="true">
+        <!-- Time triggers -->
+        <receiver android:name=".AlarmReceiver" android:exported="false" />
+
+        <!-- Location triggers -->
+        <receiver android:name=".GeofenceReceiver" android:exported="false" />
+
+        <!-- Re-arm everything -->
+        <receiver android:name=".BootReceiver" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <action android:name="android.intent.action.TIME_SET" />
                 <action android:name="android.intent.action.TIMEZONE_CHANGED" />
             </intent-filter>
+        </receiver>
+
+        <!-- Home-screen widget -->
+        <receiver android:name=".RoutinesWidget" android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_info" />
         </receiver>
     </application>
 </manifest>

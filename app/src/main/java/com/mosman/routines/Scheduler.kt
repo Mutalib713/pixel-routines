@@ -6,41 +6,38 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 
+/** Arms and cancels exact alarms for TimeOfDay triggers. */
 object Scheduler {
-    const val EXTRA_ID = "routine_id"
+    const val EXTRA_ID = "rid"
+    const val EXTRA_INDEX = "tindex"
+    const val ACTION_FIRE = "com.mosman.routines.TIME_FIRE"
 
-    private fun pending(ctx: Context, r: Routine): PendingIntent {
-        val i = Intent(ctx, RoutineFireReceiver::class.java).apply {
-            action = "com.mosman.routines.FIRE"
-            data = Uri.parse("routine://" + r.id)
-            putExtra(EXTRA_ID, r.id)
+    private fun code(id: Long, index: Int): Int = ((id and 0xFFFFFF) * 16 + index).toInt()
+
+    private fun pi(ctx: Context, id: Long, index: Int): PendingIntent {
+        val i = Intent(ctx, AlarmReceiver::class.java).apply {
+            action = ACTION_FIRE
+            data = Uri.parse("routine://$id/$index")
+            putExtra(EXTRA_ID, id)
+            putExtra(EXTRA_INDEX, index)
         }
-        return PendingIntent.getBroadcast(
-            ctx,
-            (r.id and 0x7FFFFFFF).toInt(),
-            i,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
+        return PendingIntent.getBroadcast(ctx, code(id, index), i,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     }
 
-    fun schedule(ctx: Context, r: Routine) {
+    fun scheduleTime(ctx: Context, r: Routine, index: Int, t: Trigger.TimeOfDay) {
         val am = ctx.getSystemService(AlarmManager::class.java)
-        val next = r.nextTrigger() ?: return
+        val next = nextTimeTrigger(t) ?: return
         val at = next.toInstant().toEpochMilli()
-        val pi = pending(ctx, r)
-        if (am.canScheduleExactAlarms()) {
-            am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)
-        } else {
-            // Fallback if exact alarms ever get revoked: fire within a 10-minute window
-            am.setWindow(AlarmManager.RTC_WAKEUP, at, 10 * 60_000L, pi)
-        }
+        val p = pi(ctx, r.id, index)
+        if (am.canScheduleExactAlarms())
+            am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, p)
+        else
+            am.setWindow(AlarmManager.RTC_WAKEUP, at, 10 * 60_000L, p)
     }
 
     fun cancel(ctx: Context, r: Routine) {
-        ctx.getSystemService(AlarmManager::class.java).cancel(pending(ctx, r))
-    }
-
-    fun rescheduleAll(ctx: Context) {
-        Store.load(ctx).forEach { if (it.enabled) schedule(ctx, it) else cancel(ctx, it) }
+        val am = ctx.getSystemService(AlarmManager::class.java)
+        r.triggers.forEachIndexed { i, _ -> am.cancel(pi(ctx, r.id, i)) }
     }
 }
