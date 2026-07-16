@@ -26,7 +26,11 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // material-icons-extended alone is ~20 MB of unused vectors; R8 strips
+            // everything we never reference and takes the APK from ~45 MB to ~12 MB.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.getByName("release")
         }
     }

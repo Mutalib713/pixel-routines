@@ -1,74 +1,120 @@
 # Pixel Routines
 
-My own version of Samsung's **Modes & Routines** for the Google Pixel 6 Pro — schedule your phone to change sound mode, Do Not Disturb, volumes, brightness and auto-rotate at exact times, automatically.
+My own version of Samsung's **Modes & Routines**, built for the Google Pixel — the automation
+app Pixels never shipped. Tell your phone *"IF this happens, THEN do that"* and it just
+happens: go silent at bedtime, vibrate on campus, Battery Saver when you're low, dark theme
+after dark.
 
-Built with **Kotlin + Jetpack Compose + Material You** (dynamic color — the app themes itself from your wallpaper and follows system light/dark, just like Google's own apps). No root required.
+**Kotlin · Jetpack Compose · Material You** (the UI themes itself from your wallpaper and
+follows system light/dark, like Google's own apps). No root required.
 
-## Features (v1)
+---
 
-- ⏰ Unlimited routines, each with a name, exact time and days of the week
-- 🔕 Sound mode: **Sound / Vibrate / Silent**
-- 🌙 **Do Not Disturb** on/off
-- 🔊 Media / Ring / Alarm volume levels
-- 💡 Brightness level and auto-rotate on/off
-- ▶️ **Run now** button to test any routine instantly
-- ⏭️ "Next run" countdown on every routine
-- 🔔 Optional notification confirming each run
-- ♻️ Survives reboots, app updates, time and timezone changes
-- 🎯 Exact-minute triggers that work through Doze (deep sleep)
+## What it does
+
+### IF — triggers
+| | |
+|---|---|
+| ⏱ **Time of day** | at a set time, on the days you choose |
+| 🔋 **Battery level** | drops below / rises above a % |
+| 🔌 **Charging** | charger connected or unplugged |
+| 🎧 **Headphones** | wired headset in or out |
+| 🔵 **Bluetooth** | a device (or any device) connects/disconnects |
+| 📶 **Wi-Fi** | joining or leaving a network |
+| 📍 **Location** | arriving at or leaving a place — pick it on the built-in map |
+| 📱 **Screen** / ✈️ **Airplane mode** | turns on or off |
+
+Combine several with **Any** or **All**, and narrow them with **conditions** (only on
+weekdays, only between times, only under a battery %, only while charging).
+
+### THEN — actions
+Ringer (silent/vibrate/sound) · Do Not Disturb · any volume (media, ring, notification,
+alarm, call) · brightness · auto-rotate · dark theme · Battery Saver · open an app ·
+flashlight · reminders · Wi-Fi / Bluetooth / airplane toggles.
+
+### UNTIL — end conditions
+Give a routine an end condition and choose what happens when it stops:
+
+- **Undo the changes** *(default)* — the app snapshots your settings before the routine runs
+  and puts them back exactly as they were
+- **Leave as is**
+- **Run other actions**
+
+### Also
+- **Home-screen widget** — every routine as a tap-to-toggle row (On / Off / Running)
+- **Ideas gallery** — ready-made routines, one tap to add
+- **Run now** — test any routine instantly
+- Survives reboots, app updates, clock and timezone changes
+
+---
+
+## What Android allows (and the ways around it)
+
+| Capability | How it's unlocked |
+|---|---|
+| Ringer, DND, volumes | **Do Not Disturb access** — one toggle, the app walks you through it |
+| Exact timing | `USE_EXACT_ALARM`, auto-granted |
+| Brightness, auto-rotate | **Modify system settings** — one toggle |
+| **Dark theme, Battery Saver** | one command from a computer, once (Settings → *Copy command*):<br>`adb shell pm grant com.mosman.routines android.permission.WRITE_SECURE_SETTINGS`<br>It sticks forever, even across reboots. This is how Tasker does it. |
+| **Wi-Fi / Bluetooth / airplane toggles** | Google removed these APIs from normal apps (Wi-Fi in Android 10, Bluetooth in 13). The only no-root route is **[Shizuku](https://shizuku.rikka.app)** — Settings shows live status and guides setup. |
+| Location triggers | Location permission set to **Allow all the time** (background) |
+
+Anything not listed needs root, and is out of scope.
+
+---
 
 ## How it works
 
-`AlarmManager.setExactAndAllowWhileIdle()` fires a `BroadcastReceiver` at the routine's
-time; the receiver applies the actions and re-arms the next occurrence. A boot receiver
-re-arms everything after restarts. Routines are stored as JSON in `SharedPreferences` —
-no database, no background service, no battery drain.
+`AlarmManager.setExactAndAllowWhileIdle` drives time triggers; a light foreground service
+listens for live events (battery, charging, Bluetooth, Wi-Fi, headphones, screen); geofences
+come from `GeofencingClient`. A boot receiver re-arms everything after a restart. Routines are
+JSON in `SharedPreferences` — no database.
 
-| Capability | Requires |
-|---|---|
-| Exact alarms | `USE_EXACT_ALARM` (auto-granted) |
-| Ringer + DND | Do Not Disturb access (one-time toggle in Settings, the app guides you) |
-| Brightness / rotate | "Modify system settings" (one-time toggle) |
-| Run confirmations | Notification permission (optional) |
+Snapshots are the neat bit: the "before" state is captured as the very same `Action` objects,
+so undoing a routine is just replaying them.
+
+```
+Model.kt      sealed Trigger / Condition / Action + Routine
+Engine.kt     arms triggers, evaluates conditions, fires and ends routines
+Snapshot.kt   captures/restores state for "undo the changes"
+Actions.kt    executes each action
+EventService  foreground service for live event triggers
+Geofences.kt  location triggers
+PlacePicker   in-app map + place search (OpenStreetMap, no API key)
+ShizukuBridge ADB-level shell for the restricted toggles
+```
+
+---
 
 ## Building (no Android Studio needed)
 
-Requirements: Android SDK (platform 36 + build tools) and a JDK 17+.
-This repo builds from the command line only — handy on low-RAM machines.
+Needs the Android SDK (platform 36 + build-tools) and a JDK 17+. Builds from the command
+line only — handy on a low-RAM machine.
 
 ```powershell
-# Windows (PowerShell) — adjust paths to your JDK / Gradle
 $env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
 gradle -p . :app:assembleRelease --no-daemon
 ```
 
-APK lands in `app/build/outputs/apk/release/`.
+APK lands in `app/build/outputs/apk/release/` (~3.4 MB, R8-minified).
 
-**Signing:** create your own keystore once (the file is git-ignored):
+**Signing** — create your own keystore once (it's git-ignored):
 
 ```powershell
 keytool -genkeypair -keystore routines.keystore -alias routines -keyalg RSA `
-  -keysize 2048 -validity 10950 -storepass routines2026 -keypass routines2026 `
-  -dname "CN=Routines"
+  -keysize 2048 -validity 10950 -storepass routines2026 -keypass routines2026 -dname "CN=Routines"
 ```
 
-**Note (Avast users):** if dependency downloads fail with "not found", Avast's HTTPS
-scanning is re-signing TLS. `gradle.properties` in this repo already contains the fix
-(`systemProp.javax.net.ssl.trustStoreType=Windows-ROOT`).
+**Avast users:** its Web Shield re-signs HTTPS, which the build JVM won't trust, and Gradle
+misreports it as *"plugin not found"*. `gradle.properties` points at a local truststore —
+rebuild it with `keytool` if Avast is reinstalled.
 
-## Install on the phone
+**Gotchas worth knowing:** AGP 9 has built-in Kotlin, so the `org.jetbrains.kotlin.android`
+plugin must *not* be applied. Enum constant names are pinned in `proguard-rules.pro` because
+routines are stored by enum name — letting R8 rename them would silently wipe saved data on
+upgrade.
 
-1. Copy the APK over (USB, Google Drive, or `adb install`).
-2. Tap it → allow installs from that app → **Install anyway** if Play Protect warns
-   (expected for self-built apps).
-3. Open Routines and grant the accesses it asks for on the home screen.
+## Install
 
-## Roadmap
-
-- **v1.1** — Dark theme + Battery Saver actions (via one-time
-  `adb shell pm grant … WRITE_SECURE_SETTINGS`, the Tasker approach), launch-app action, reminders
-- **v2** — Trigger engine: Bluetooth device connects, Wi-Fi network, battery level,
-  charging state, with IF/AND conditions
-- **v2.5** — Optional [Shizuku](https://shizuku.rikka.app) module: Wi-Fi / Bluetooth /
-  mobile data / airplane-mode toggles
-- **v3** — Location (geofence) routines, e.g. arrive at campus → vibrate
+Copy the APK to the phone (Drive or USB) → tap it → allow installs from that app → Play
+Protect will warn about any self-built app, choose **More details → Install anyway**.
