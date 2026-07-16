@@ -36,8 +36,9 @@ object Scheduler {
             am.setWindow(AlarmManager.RTC_WAKEUP, at, 10 * 60_000L, p)
     }
 
+    /** Cancels every possible slot (start 0..7, end 8..15) so nothing is left armed. */
     fun cancel(ctx: Context, r: Routine) {
         val am = ctx.getSystemService(AlarmManager::class.java)
-        r.triggers.forEachIndexed { i, _ -> am.cancel(pi(ctx, r.id, i)) }
+        for (i in 0 until 16) am.cancel(pi(ctx, r.id, i))
     }
 }

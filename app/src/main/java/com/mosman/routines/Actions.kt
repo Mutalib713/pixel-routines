@@ -83,9 +83,9 @@ object Actions {
                     Settings.Global.putInt(ctx.contentResolver, "low_power", if (a.on) 1 else 0)
                     "Battery Saver ${if (a.on) "on" else "off"}"
                 }
-                is Action.WifiToggle -> Shizuku.svc("wifi", a.on)
-                is Action.BluetoothToggle -> Shizuku.bluetooth(a.on)
-                is Action.AirplaneToggle -> Shizuku.airplane(a.on)
+                is Action.WifiToggle -> ShizukuBridge.wifi(a.on)
+                is Action.BluetoothToggle -> ShizukuBridge.bluetooth(a.on)
+                is Action.AirplaneToggle -> ShizukuBridge.airplane(a.on)
                 is Action.LaunchApp -> {
                     val i = ctx.packageManager.getLaunchIntentForPackage(a.pkg)
                         ?: return "Can't open ${a.label}"
@@ -126,8 +126,14 @@ object Actions {
         runCatching { nm.notify(title.hashCode(), n) }
     }
 
+    /** Notification confirming a routine ended and what it put back. */
+    fun notifyEnded(ctx: Context, r: Routine, results: List<String>) =
+        post(ctx, r, "${r.name} ended", results)
+
     /** Notification confirming a routine ran (Samsung-style toast card). */
-    fun notifyRan(ctx: Context, r: Routine, results: List<String>) {
+    fun notifyRan(ctx: Context, r: Routine, results: List<String>) = post(ctx, r, r.name, results)
+
+    private fun post(ctx: Context, r: Routine, title: String, results: List<String>) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(
             NotificationChannel("runs", "Routine activity", NotificationManager.IMPORTANCE_LOW))
@@ -135,7 +141,7 @@ object Actions {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val n = Notification.Builder(ctx, "runs")
             .setSmallIcon(R.drawable.ic_stat)
-            .setContentTitle("${r.emoji}  ${r.name}")
+            .setContentTitle(title)
             .setContentText(results.joinToString(" · "))
             .setStyle(Notification.BigTextStyle().bigText(results.joinToString("\n")))
             .setContentIntent(open)

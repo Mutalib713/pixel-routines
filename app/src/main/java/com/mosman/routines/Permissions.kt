@@ -43,6 +43,10 @@ object Permissions {
     fun writeSettings(ctx: Context) =
         Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:${ctx.packageName}"))
 
+    /** Background location can only be granted from the app's own settings page. */
+    fun appDetails(ctx: Context) =
+        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}"))
+
     @Suppress("DEPRECATION")
     fun currentSsid(ctx: Context): String? {
         if (!hasFineLocation(ctx)) return null
@@ -64,7 +68,7 @@ object Permissions {
                 Access.DND -> !hasDnd(ctx)
                 Access.WRITE_SETTINGS -> !hasWriteSettings(ctx)
                 Access.SECURE_SETTINGS -> !hasSecureSettings(ctx)
-                Access.SHIZUKU -> !Shizuku.available
+                Access.SHIZUKU -> !ShizukuBridge.ready
             }
         }
     }

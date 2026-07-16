@@ -3,7 +3,9 @@
 package com.mosman.routines
 
 import android.Manifest
-import android.content.Intent
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -11,8 +13,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -20,7 +26,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -35,8 +44,10 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 
 sealed interface Screen {
+    data object Onboarding : Screen
     data object Home : Screen
     data object Discover : Screen
+    data object Settings : Screen
     data class Edit(val routine: Routine) : Screen
 }
 
@@ -56,16 +67,20 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun AppRoot(tick: Int, refresh: () -> Unit) {
     val ctx = LocalContext.current
-    var screen by remember { mutableStateOf<Screen>(Screen.Home) }
+    var screen by remember {
+        mutableStateOf<Screen>(if (Store.onboarded(ctx)) Screen.Home else Screen.Onboarding)
+    }
     var routines by remember { mutableStateOf(Store.load(ctx)) }
     fun reload() { routines = Store.load(ctx) }
 
     when (val s = screen) {
+        is Screen.Onboarding -> Onboarding(tick) { screen = Screen.Home }
         is Screen.Home -> HomeScreen(
             routines = routines,
             tick = tick,
             onRefreshPerms = refresh,
             onOpenDiscover = { screen = Screen.Discover },
+            onOpenSettings = { screen = Screen.Settings },
             onNew = { screen = Screen.Edit(Routine.new()) },
             onOpen = { screen = Screen.Edit(it) },
             onToggle = { r, on -> Store.setEnabled(ctx, r.id, on); reload() },
@@ -76,6 +91,7 @@ private fun AppRoot(tick: Int, refresh: () -> Unit) {
             onPick = { built -> Store.upsert(ctx, built); reload(); screen = Screen.Edit(built) },
             onScratch = { screen = Screen.Edit(Routine.new()) },
         )
+        is Screen.Settings -> SettingsScreen(tick, onBack = { screen = Screen.Home })
         is Screen.Edit -> EditorScreen(
             initial = s.routine,
             onSave = { r -> Store.upsert(ctx, r); reload(); screen = Screen.Home },
@@ -91,23 +107,25 @@ private fun HomeScreen(
     tick: Int,
     onRefreshPerms: () -> Unit,
     onOpenDiscover: () -> Unit,
+    onOpenSettings: () -> Unit,
     onNew: () -> Unit,
     onOpen: (Routine) -> Unit,
     onToggle: (Routine, Boolean) -> Unit,
     onRunNow: (Routine) -> List<String>,
 ) {
+    val ctx = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    val activeIds = remember(tick, routines) { Store.activeIds(ctx) }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             LargeTopAppBar(
                 title = { Text("Pixel Routines", fontWeight = FontWeight.Bold) },
                 actions = {
-                    TextButton(onClick = onOpenDiscover) {
-                        Text("💡", fontSize = 16.sp)
-                        Spacer(Modifier.width(6.dp)); Text("Ideas")
-                    }
+                    IconButton(onClick = onOpenDiscover) { Icon(Icons.Filled.Lightbulb, "Ideas") }
+                    IconButton(onClick = onOpenSettings) { Icon(Icons.Filled.Settings, "Settings") }
                 },
             )
         },
@@ -128,6 +146,7 @@ private fun HomeScreen(
             if (routines.isEmpty()) item { EmptyState(onOpenDiscover) }
             items(routines, key = { it.id }) { r ->
                 RoutineCard(r,
+                    running = activeIds.contains(r.id),
                     onClick = { onOpen(r) },
                     onToggle = { onToggle(r, it) },
                     onRunNow = {
@@ -143,29 +162,45 @@ private fun HomeScreen(
 }
 
 @Composable
-private fun RoutineCard(r: Routine, onClick: () -> Unit, onToggle: (Boolean) -> Unit, onRunNow: () -> Unit) {
-    ElevatedCard(
-        onClick = onClick,
-        shape = RoundedCornerShape(24.dp),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
+private fun RoutineCard(
+    r: Routine, running: Boolean,
+    onClick: () -> Unit, onToggle: (Boolean) -> Unit, onRunNow: () -> Unit,
+) {
+    ElevatedCard(onClick = onClick, shape = RoundedCornerShape(28.dp),
+        modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
-                    Modifier.size(44.dp).clip(CircleShape)
+                    Modifier.size(46.dp).clip(CircleShape)
                         .background(MaterialTheme.colorScheme.primaryContainer),
                     contentAlignment = Alignment.Center,
-                ) { Text(r.emoji, fontSize = 22.sp) }
+                ) {
+                    Icon(Ic.of(r.icon), null, Modifier.size(24.dp),
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                }
                 Spacer(Modifier.width(12.dp))
-                Text(r.name.ifBlank { "Untitled" }, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Column(Modifier.weight(1f)) {
+                    Text(r.name.ifBlank { "Untitled" }, fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    AnimatedVisibility(
+                        visible = running,
+                        enter = scaleIn(spring(dampingRatio = Spring.DampingRatioMediumBouncy)),
+                        exit = scaleOut(),
+                    ) {
+                        Text("Running now", fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary)
+                    }
+                }
                 Switch(checked = r.enabled, onCheckedChange = onToggle)
             }
             Spacer(Modifier.height(12.dp))
             SummaryLine("IF", r.ifSummary(), MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(6.dp))
             SummaryLine("THEN", r.thenSummary(), MaterialTheme.colorScheme.tertiary)
-            Spacer(Modifier.height(4.dp))
+            r.endSummary()?.let {
+                Spacer(Modifier.height(6.dp))
+                SummaryLine("UNTIL", it, MaterialTheme.colorScheme.secondary)
+            }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 TextButton(onClick = onRunNow) {
                     Icon(Icons.Filled.PlayArrow, null, Modifier.size(18.dp))
@@ -180,7 +215,7 @@ private fun RoutineCard(r: Routine, onClick: () -> Unit, onToggle: (Boolean) -> 
 private fun SummaryLine(tag: String, text: String, tagColor: Color) {
     Row(verticalAlignment = Alignment.Top) {
         Box(
-            Modifier.clip(RoundedCornerShape(6.dp)).background(tagColor.copy(alpha = 0.15f))
+            Modifier.clip(RoundedCornerShape(8.dp)).background(tagColor.copy(alpha = 0.15f))
                 .padding(horizontal = 8.dp, vertical = 2.dp),
         ) { Text(tag, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = tagColor) }
         Spacer(Modifier.width(10.dp))
@@ -191,9 +226,10 @@ private fun SummaryLine(tag: String, text: String, tagColor: Color) {
 
 @Composable
 private fun EmptyState(onOpenDiscover: () -> Unit) {
-    Card(shape = RoundedCornerShape(24.dp), modifier = Modifier.fillMaxWidth()) {
+    Card(shape = RoundedCornerShape(28.dp), modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("✨", fontSize = 40.sp)
+            Icon(Icons.Filled.AutoAwesome, null, Modifier.size(40.dp),
+                tint = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(8.dp))
             Text("Let your phone run itself", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(4.dp))
@@ -201,7 +237,7 @@ private fun EmptyState(onOpenDiscover: () -> Unit) {
                 fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(16.dp))
             FilledTonalButton(onClick = onOpenDiscover) {
-                Text("💡", fontSize = 16.sp)
+                Icon(Icons.Filled.Lightbulb, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp)); Text("Browse ideas")
             }
         }
@@ -222,22 +258,24 @@ private fun PermissionArea(routines: List<Routine>, tick: Int, refresh: () -> Un
         routines.any { r -> r.actions.any { it.access() == Access.WRITE_SETTINGS } } &&
             !Permissions.hasWriteSettings(ctx)
     }
-    val needNotif = remember(tick) {
-        Build.VERSION.SDK_INT >= 33 && !Permissions.hasNotifications(ctx)
+    val needNotif = remember(tick) { Build.VERSION.SDK_INT >= 33 && !Permissions.hasNotifications(ctx) }
+    val needLoc = remember(tick, routines) {
+        routines.any { r -> (r.triggers + r.endTriggers).any { it is Trigger.Location } } &&
+            !Permissions.hasBackgroundLocation(ctx)
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (needDnd) PermCard("Allow Do Not Disturb access",
-            "Unlocks Silent / Vibrate / Sound and DND. Choose Pixel Routines, then allow.") {
-            ctx.startActivity(Permissions.dndSettings())
-        }
+            "Unlocks Silent / Vibrate / Sound and DND.") { ctx.startActivity(Permissions.dndSettings()) }
         if (needExact) PermCard("Allow exact alarms",
             "So timed routines fire on the exact minute.") {
             ctx.startActivity(Permissions.exactAlarmSettings(ctx))
         }
         if (needWrite) PermCard("Allow modifying system settings",
-            "Needed for brightness and auto-rotate.") {
-            ctx.startActivity(Permissions.writeSettings(ctx))
+            "Needed for brightness and auto-rotate.") { ctx.startActivity(Permissions.writeSettings(ctx)) }
+        if (needLoc) PermCard("Allow location all the time",
+            "Location routines need background access to fire when the app is closed.") {
+            ctx.startActivity(Permissions.appDetails(ctx))
         }
         if (needNotif) PermCard("Allow notifications",
             "Get a confirmation when a routine runs.") {
@@ -248,10 +286,8 @@ private fun PermissionArea(routines: List<Routine>, tick: Int, refresh: () -> Un
 
 @Composable
 private fun PermCard(title: String, desc: String, onGrant: () -> Unit) {
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
-    ) {
+    Card(shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
         Row(Modifier.padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 8.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -270,21 +306,17 @@ private fun PermCard(title: String, desc: String, onGrant: () -> Unit) {
 @Composable
 private fun DiscoverScreen(onBack: () -> Unit, onPick: (Routine) -> Unit, onScratch: () -> Unit) {
     Scaffold(topBar = {
-        TopAppBar(
-            title = { Text("Ideas") },
-            navigationIcon = { IconButton(onClick = onBack) { BackIcon() } },
-        )
+        TopAppBar(title = { Text("Ideas") },
+            navigationIcon = { IconButton(onClick = onBack) { BackIcon() } })
     }) { pad ->
-        LazyColumn(
-            Modifier.fillMaxSize().padding(pad),
+        LazyColumn(Modifier.fillMaxSize().padding(pad),
             contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item {
                 OutlinedCard(onClick = onScratch, shape = RoundedCornerShape(20.dp),
                     modifier = Modifier.fillMaxWidth()) {
                     Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("✏️", fontSize = 24.sp); Spacer(Modifier.width(12.dp))
+                        Icon(Icons.Filled.Add, null); Spacer(Modifier.width(12.dp))
                         Column {
                             Text("Start from scratch", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
                             Text("Build your own IF → THEN", fontSize = 13.sp,
@@ -300,7 +332,10 @@ private fun DiscoverScreen(onBack: () -> Unit, onPick: (Routine) -> Unit, onScra
                     Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.size(44.dp).clip(CircleShape)
                             .background(MaterialTheme.colorScheme.primaryContainer),
-                            contentAlignment = Alignment.Center) { Text(r.emoji, fontSize = 22.sp) }
+                            contentAlignment = Alignment.Center) {
+                            Icon(Ic.of(r.icon), null, Modifier.size(22.dp),
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                        }
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(r.name, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
@@ -312,6 +347,101 @@ private fun DiscoverScreen(onBack: () -> Unit, onPick: (Routine) -> Unit, onScra
                 }
             }
             item { Spacer(Modifier.height(24.dp)) }
+        }
+    }
+}
+
+// ---- Settings ----
+
+@Composable
+private fun SettingsScreen(tick: Int, onBack: () -> Unit) {
+    val ctx = LocalContext.current
+    val snackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    val shizukuStatus = remember(tick) { ShizukuBridge.status(ctx) }
+    val shizukuReady = remember(tick) { ShizukuBridge.ready }
+    val secureGranted = remember(tick) { Permissions.hasSecureSettings(ctx) }
+    val adbCmd = "adb shell pm grant ${ctx.packageName} android.permission.WRITE_SECURE_SETTINGS"
+
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbar) },
+        topBar = {
+            TopAppBar(title = { Text("Settings") },
+                navigationIcon = { IconButton(onClick = onBack) { BackIcon() } })
+        },
+    ) { pad ->
+        LazyColumn(Modifier.fillMaxSize().padding(pad),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+
+            item {
+                SettingCard(
+                    title = "Shizuku",
+                    body = "Unlocks the Wi-Fi, Bluetooth and airplane-mode toggles that Android " +
+                        "blocks for normal apps. Install Shizuku, start it with wireless debugging, " +
+                        "then allow Pixel Routines.",
+                    status = shizukuStatus,
+                    ok = shizukuReady,
+                    buttonText = if (ShizukuBridge.running && !ShizukuBridge.granted) "Allow" else "Open Shizuku",
+                ) {
+                    if (ShizukuBridge.running && !ShizukuBridge.granted) ShizukuBridge.requestPermission()
+                    else ShizukuBridge.openShizuku(ctx)
+                }
+            }
+
+            item {
+                SettingCard(
+                    title = "Dark theme & Battery Saver",
+                    body = "These need one command from a computer, once. Plug in over USB with " +
+                        "USB debugging on, then run it — it sticks forever, even after reboots.",
+                    status = if (secureGranted) "Granted" else "Not granted",
+                    ok = secureGranted,
+                    buttonText = "Copy command",
+                ) {
+                    val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    cm.setPrimaryClip(ClipData.newPlainText("adb", adbCmd))
+                    scope.launch { snackbar.showSnackbar("Command copied") }
+                }
+            }
+
+            item {
+                Card(shape = RoundedCornerShape(20.dp)) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("The command", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                        Spacer(Modifier.height(6.dp))
+                        Text(adbCmd, fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingCard(
+    title: String, body: String, status: String, ok: Boolean,
+    buttonText: String, onClick: () -> Unit,
+) {
+    Card(shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                Box(Modifier.clip(RoundedCornerShape(8.dp))
+                    .background(
+                        if (ok) MaterialTheme.colorScheme.primaryContainer
+                        else MaterialTheme.colorScheme.errorContainer)
+                    .padding(horizontal = 8.dp, vertical = 3.dp)) {
+                    Text(status, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                        color = if (ok) MaterialTheme.colorScheme.onPrimaryContainer
+                        else MaterialTheme.colorScheme.onErrorContainer)
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(body, fontSize = 13.sp, lineHeight = 19.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(10.dp))
+            FilledTonalButton(onClick = onClick) { Text(buttonText) }
         }
     }
 }

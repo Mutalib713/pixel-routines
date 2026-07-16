@@ -29,8 +29,10 @@ class GeofenceReceiver : BroadcastReceiver() {
         if (event.hasError()) return
         val enter = event.geofenceTransition == Geofence.GEOFENCE_TRANSITION_ENTER
         event.triggeringGeofences?.forEach { g ->
-            val id = g.requestId.substringBefore(":").toLongOrNull() ?: return@forEach
-            Engine.onGeofence(context, id, enter)
+            val parts = g.requestId.split(":")
+            val id = parts.getOrNull(0)?.toLongOrNull() ?: return@forEach
+            val index = parts.getOrNull(1)?.toIntOrNull() ?: 0
+            Engine.onGeofence(context, id, index, enter)
         }
     }
 }

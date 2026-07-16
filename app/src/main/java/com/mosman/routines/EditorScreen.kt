@@ -17,51 +17,53 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import java.time.DayOfWeek
-import java.time.format.TextStyle as JTextStyle
 import java.util.Locale
+import java.time.format.TextStyle as JTextStyle
 
 @Composable
 fun BackIcon() = Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
 
-// Kinds drive the picker menus.
-private enum class TriggerKind(val emoji: String, val label: String, val sub: String) {
-    TIME("⏰", "Time of day", "At a set time on chosen days"),
-    BATTERY("🔋", "Battery level", "Drops below / rises above a %"),
-    POWER("🔌", "Charging", "Charger connected or unplugged"),
-    HEADSET("🎧", "Headphones", "Wired headset plugged/unplugged"),
-    BLUETOOTH("🔵", "Bluetooth device", "A device connects/disconnects"),
-    WIFI("📶", "Wi-Fi network", "Join or leave a network"),
-    LOCATION("📍", "Location", "Arrive at or leave a place"),
-    SCREEN("📱", "Screen", "Screen turns on or off"),
-    AIRPLANE("✈️", "Airplane mode", "Airplane mode on or off"),
+private enum class TriggerKind(val icon: String, val label: String, val sub: String) {
+    TIME("schedule", "Time of day", "At a set time on chosen days"),
+    BATTERY("battery", "Battery level", "Drops below / rises above a %"),
+    POWER("power", "Charging", "Charger connected or unplugged"),
+    HEADSET("headphones", "Headphones", "Wired headset plugged/unplugged"),
+    BLUETOOTH("bluetooth", "Bluetooth device", "A device connects/disconnects"),
+    WIFI("wifi", "Wi-Fi network", "Join or leave a network"),
+    LOCATION("location", "Location", "Arrive at or leave a place"),
+    SCREEN("screen", "Screen", "Screen turns on or off"),
+    AIRPLANE("flight", "Airplane mode", "Airplane mode on or off"),
 }
 
-private enum class ActionKind(val emoji: String, val label: String, val access: Access) {
-    RINGER("🔕", "Ringer mode", Access.DND),
-    DND("🌙", "Do Not Disturb", Access.DND),
-    VOLUME("🔊", "Set a volume", Access.NONE),
-    BRIGHTNESS("💡", "Brightness", Access.WRITE_SETTINGS),
-    ROTATE("🔄", "Auto-rotate", Access.WRITE_SETTINGS),
-    DARK("🌑", "Dark theme", Access.SECURE_SETTINGS),
-    SAVER("🪫", "Battery Saver", Access.SECURE_SETTINGS),
-    WIFI("📶", "Wi-Fi on/off", Access.SHIZUKU),
-    BLUETOOTH("🔵", "Bluetooth on/off", Access.SHIZUKU),
-    AIRPLANE("✈️", "Airplane on/off", Access.SHIZUKU),
-    APP("📲", "Open an app", Access.NONE),
-    FLASH("🔦", "Flashlight", Access.NONE),
-    NOTIFY("🔔", "Show a reminder", Access.NONE),
+private enum class ActionKind(val icon: String, val label: String, val access: Access) {
+    RINGER("ringer", "Ringer mode", Access.DND),
+    DND("dnd", "Do Not Disturb", Access.DND),
+    VOLUME("volume", "Set a volume", Access.NONE),
+    BRIGHTNESS("brightness", "Brightness", Access.WRITE_SETTINGS),
+    ROTATE("rotate", "Auto-rotate", Access.WRITE_SETTINGS),
+    DARK("dark", "Dark theme", Access.SECURE_SETTINGS),
+    SAVER("saver", "Battery Saver", Access.SECURE_SETTINGS),
+    WIFI("wifi", "Wi-Fi on/off", Access.SHIZUKU),
+    BLUETOOTH("bluetooth", "Bluetooth on/off", Access.SHIZUKU),
+    AIRPLANE("flight", "Airplane on/off", Access.SHIZUKU),
+    APP("app", "Open an app", Access.NONE),
+    FLASH("flash", "Flashlight", Access.NONE),
+    NOTIFY("notify", "Show a reminder", Access.NONE),
 }
 
 private enum class ConditionKind(val label: String) {
@@ -71,6 +73,9 @@ private enum class ConditionKind(val label: String) {
     CHARGING("Only while charging"),
 }
 
+private data class TrigEdit(val kind: TriggerKind, val index: Int?, val isEnd: Boolean)
+private data class ActEdit(val kind: ActionKind, val index: Int?, val isEnd: Boolean)
+
 @Composable
 fun EditorScreen(
     initial: Routine,
@@ -79,25 +84,29 @@ fun EditorScreen(
     onBack: () -> Unit,
 ) {
     var name by remember { mutableStateOf(initial.name) }
-    var emoji by remember { mutableStateOf(initial.emoji) }
+    var icon by remember { mutableStateOf(initial.icon) }
     var match by remember { mutableStateOf(initial.match) }
+    var endMode by remember { mutableStateOf(initial.endMode) }
     val triggers = remember { mutableStateListOf<Trigger>().apply { addAll(initial.triggers) } }
     val conditions = remember { mutableStateListOf<Condition>().apply { addAll(initial.conditions) } }
     val actions = remember { mutableStateListOf<Action>().apply { addAll(initial.actions) } }
+    val endTriggers = remember { mutableStateListOf<Trigger>().apply { addAll(initial.endTriggers) } }
+    val endActions = remember { mutableStateListOf<Action>().apply { addAll(initial.endActions) } }
     val ctx = LocalContext.current
     val existing = remember { Store.get(ctx, initial.id) != null }
 
-    var showTriggerSheet by remember { mutableStateOf(false) }
-    var showActionSheet by remember { mutableStateOf(false) }
+    var triggerSheetFor by remember { mutableStateOf<Boolean?>(null) }  // false=start, true=end
+    var actionSheetFor by remember { mutableStateOf<Boolean?>(null) }
     var showConditionSheet by remember { mutableStateOf(false) }
-    var showEmoji by remember { mutableStateOf(false) }
-    var editTrigger by remember { mutableStateOf<Pair<TriggerKind, Int?>?>(null) }
-    var editAction by remember { mutableStateOf<Pair<ActionKind, Int?>?>(null) }
+    var showIconPicker by remember { mutableStateOf(false) }
+    var editTrigger by remember { mutableStateOf<TrigEdit?>(null) }
+    var editAction by remember { mutableStateOf<ActEdit?>(null) }
     var editCondition by remember { mutableStateOf<Pair<ConditionKind, Int?>?>(null) }
 
     fun result() = initial.copy(
-        name = name.ifBlank { "Routine" }, emoji = emoji, match = match,
+        name = name.ifBlank { "Routine" }, icon = icon, match = match,
         triggers = triggers.toList(), conditions = conditions.toList(), actions = actions.toList(),
+        endTriggers = endTriggers.toList(), endMode = endMode, endActions = endActions.toList(),
     )
     val valid = triggers.isNotEmpty() && actions.isNotEmpty()
 
@@ -118,7 +127,7 @@ fun EditorScreen(
                 Box(Modifier.fillMaxWidth().padding(16.dp)) {
                     Button(onClick = { onSave(result()) }, enabled = valid,
                         modifier = Modifier.fillMaxWidth().height(52.dp),
-                        shape = RoundedCornerShape(16.dp)) {
+                        shape = RoundedCornerShape(18.dp)) {
                         Text("Save routine", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     }
                 }
@@ -126,16 +135,18 @@ fun EditorScreen(
         },
     ) { pad ->
         Column(
-            Modifier.fillMaxSize().padding(pad).verticalScroll(rememberScrollState())
-                .padding(16.dp),
+            Modifier.fillMaxSize().padding(pad).verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            // Name + emoji
+            // Name + icon
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(56.dp).clip(CircleShape)
                     .background(MaterialTheme.colorScheme.primaryContainer)
-                    .clickable { showEmoji = true },
-                    contentAlignment = Alignment.Center) { Text(emoji, fontSize = 26.sp) }
+                    .clickable { showIconPicker = true },
+                    contentAlignment = Alignment.Center) {
+                    Icon(Ic.of(icon), "Choose icon", Modifier.size(28.dp),
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                }
                 Spacer(Modifier.width(12.dp))
                 OutlinedTextField(value = name, onValueChange = { name = it },
                     label = { Text("Name") }, placeholder = { Text("e.g. Bedtime") },
@@ -156,31 +167,63 @@ fun EditorScreen(
             }
             triggers.forEachIndexed { i, t ->
                 ItemRow(t.icon(), t.describe(),
-                    onClick = { editTrigger = kindOf(t) to i },
+                    onClick = { editTrigger = TrigEdit(kindOf(t), i, false) },
                     onRemove = { triggers.removeAt(i) })
             }
-            AddButton("Add trigger") { showTriggerSheet = true }
+            AddButton("Add trigger") { triggerSheetFor = false }
 
-            // WHEN (optional conditions)
-            if (conditions.isNotEmpty() || triggers.isNotEmpty()) {
-                SectionHeader("ONLY IF", "these also hold (optional)", MaterialTheme.colorScheme.secondary)
-                conditions.forEachIndexed { i, c ->
-                    ItemRow("✔️", c.describe().replaceFirstChar { it.uppercase() },
-                        onClick = { editCondition = kindOfCond(c) to i },
-                        onRemove = { conditions.removeAt(i) })
-                }
-                AddButton("Add condition") { showConditionSheet = true }
+            // ONLY IF
+            SectionHeader("ONLY IF", "these also hold (optional)", MaterialTheme.colorScheme.secondary)
+            conditions.forEachIndexed { i, c ->
+                ItemRow("check", c.describe().replaceFirstChar { it.uppercase() },
+                    onClick = { editCondition = kindOfCond(c) to i },
+                    onRemove = { conditions.removeAt(i) })
             }
+            AddButton("Add condition") { showConditionSheet = true }
 
             // THEN
             SectionHeader("THEN", "do this", MaterialTheme.colorScheme.tertiary)
             actions.forEachIndexed { i, a ->
                 ItemRow(a.icon(), a.describe(),
-                    onClick = { editAction = kindOf(a) to i },
+                    onClick = { editAction = ActEdit(kindOf(a), i, false) },
                     onRemove = { actions.removeAt(i) },
                     badge = accessBadge(a.access()))
             }
-            AddButton("Add action") { showActionSheet = true }
+            AddButton("Add action") { actionSheetFor = false }
+
+            // UNTIL (end condition)
+            SectionHeader("UNTIL", "the routine should stop (optional)",
+                MaterialTheme.colorScheme.secondary)
+            endTriggers.forEachIndexed { i, t ->
+                ItemRow(t.icon(), t.describe(),
+                    onClick = { editTrigger = TrigEdit(kindOf(t), i, true) },
+                    onRemove = { endTriggers.removeAt(i) })
+            }
+            AddButton("Add end condition") { triggerSheetFor = true }
+
+            if (endTriggers.isNotEmpty()) {
+                Text("When it stops", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    EndMode.entries.forEachIndexed { i, m ->
+                        SegmentedButton(selected = endMode == m, onClick = { endMode = m },
+                            shape = SegmentedButtonDefaults.itemShape(i, EndMode.entries.size)) {
+                            Text(m.label(), fontSize = 12.sp, maxLines = 1)
+                        }
+                    }
+                }
+                if (endMode == EndMode.REVERT) Text(
+                    "Your settings go back exactly how they were before the routine ran.",
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (endMode == EndMode.CUSTOM) {
+                    endActions.forEachIndexed { i, a ->
+                        ItemRow(a.icon(), a.describe(),
+                            onClick = { editAction = ActEdit(kindOf(a), i, true) },
+                            onRemove = { endActions.removeAt(i) },
+                            badge = accessBadge(a.access()))
+                    }
+                    AddButton("Add end action") { actionSheetFor = true }
+                }
+            }
 
             if (!valid) Text("Add at least one trigger and one action to save.",
                 fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -189,42 +232,48 @@ fun EditorScreen(
     }
 
     // ---- Picker sheets ----
-    if (showTriggerSheet) PickSheet("Choose a trigger", TriggerKind.entries,
-        { it.emoji }, { it.label }, { it.sub }, onDismiss = { showTriggerSheet = false }) {
-        showTriggerSheet = false; editTrigger = it to null
+    triggerSheetFor?.let { isEnd ->
+        PickSheet(if (isEnd) "What ends this routine?" else "Choose a trigger",
+            TriggerKind.entries, { it.icon }, { it.label }, { it.sub },
+            onDismiss = { triggerSheetFor = null }) {
+            triggerSheetFor = null; editTrigger = TrigEdit(it, null, isEnd)
+        }
     }
-    if (showActionSheet) PickSheet("Choose an action", ActionKind.entries,
-        { it.emoji }, { it.label }, { accessNote(it.access) }, onDismiss = { showActionSheet = false }) {
-        showActionSheet = false; editAction = it to null
+    actionSheetFor?.let { isEnd ->
+        PickSheet("Choose an action", ActionKind.entries,
+            { it.icon }, { it.label }, { accessNote(it.access) },
+            onDismiss = { actionSheetFor = null }) {
+            actionSheetFor = null; editAction = ActEdit(it, null, isEnd)
+        }
     }
     if (showConditionSheet) PickSheet("Add a condition", ConditionKind.entries,
-        { "✔️" }, { it.label }, { "" }, onDismiss = { showConditionSheet = false }) {
+        { "check" }, { it.label }, { "" }, onDismiss = { showConditionSheet = false }) {
         showConditionSheet = false; editCondition = it to null
     }
 
     // ---- Config dialogs ----
-    editTrigger?.let { (kind, idx) ->
-        TriggerConfig(kind, idx?.let { triggers[it] },
-            onDismiss = { editTrigger = null }) { built ->
-            if (idx == null) triggers.add(built) else triggers[idx] = built
+    editTrigger?.let { e ->
+        val list = if (e.isEnd) endTriggers else triggers
+        TriggerConfig(e.kind, e.index?.let { list[it] }, onDismiss = { editTrigger = null }) { built ->
+            if (e.index == null) list.add(built) else list[e.index] = built
             editTrigger = null
         }
     }
-    editAction?.let { (kind, idx) ->
-        ActionConfig(kind, idx?.let { actions[it] },
-            onDismiss = { editAction = null }) { built ->
-            if (idx == null) actions.add(built) else actions[idx] = built
+    editAction?.let { e ->
+        val list = if (e.isEnd) endActions else actions
+        ActionConfig(e.kind, e.index?.let { list[it] }, onDismiss = { editAction = null }) { built ->
+            if (e.index == null) list.add(built) else list[e.index] = built
             editAction = null
         }
     }
     editCondition?.let { (kind, idx) ->
-        ConditionConfig(kind, idx?.let { conditions[it] },
-            onDismiss = { editCondition = null }) { built ->
+        ConditionConfig(kind, idx?.let { conditions[it] }, onDismiss = { editCondition = null }) { built ->
             if (idx == null) conditions.add(built) else conditions[idx] = built
             editCondition = null
         }
     }
-    if (showEmoji) EmojiDialog(onPick = { emoji = it; showEmoji = false }, onDismiss = { showEmoji = false })
+    if (showIconPicker) IconPickerDialog(
+        onPick = { icon = it; showIconPicker = false }, onDismiss = { showIconPicker = false })
 }
 
 // ============================================================================
@@ -232,7 +281,7 @@ fun EditorScreen(
 // ============================================================================
 
 @Composable
-private fun SectionHeader(tag: String, sub: String, color: androidx.compose.ui.graphics.Color) {
+private fun SectionHeader(tag: String, sub: String, color: Color) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.clip(RoundedCornerShape(8.dp)).background(color.copy(alpha = 0.15f))
             .padding(horizontal = 10.dp, vertical = 4.dp)) {
@@ -244,12 +293,15 @@ private fun SectionHeader(tag: String, sub: String, color: androidx.compose.ui.g
 }
 
 @Composable
-private fun ItemRow(emoji: String, text: String, onClick: () -> Unit, onRemove: () -> Unit, badge: String? = null) {
-    Card(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+private fun ItemRow(iconKey: String, text: String, onClick: () -> Unit, onRemove: () -> Unit,
+                    badge: String? = null) {
+    Card(shape = RoundedCornerShape(18.dp),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)) {
         Row(Modifier.padding(start = 14.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            Text(emoji, fontSize = 20.sp)
-            Spacer(Modifier.width(12.dp))
+            Icon(Ic.of(iconKey), null, Modifier.size(22.dp),
+                tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(text, fontSize = 15.sp)
                 if (badge != null) Text(badge, fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
@@ -262,7 +314,7 @@ private fun ItemRow(emoji: String, text: String, onClick: () -> Unit, onRemove: 
 @Composable
 private fun AddButton(text: String, onClick: () -> Unit) {
     OutlinedButton(onClick = onClick, modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp)) {
+        shape = RoundedCornerShape(18.dp)) {
         Icon(Icons.Filled.Add, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text(text)
     }
 }
@@ -270,7 +322,7 @@ private fun AddButton(text: String, onClick: () -> Unit) {
 @Composable
 private fun <T> PickSheet(
     title: String, options: List<T>,
-    emoji: (T) -> String, label: (T) -> String, sub: (T) -> String,
+    icon: (T) -> String, label: (T) -> String, sub: (T) -> String,
     onDismiss: () -> Unit, onPick: (T) -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -281,7 +333,9 @@ private fun <T> PickSheet(
                 Row(Modifier.fillMaxWidth().clickable { onPick(opt) }
                     .padding(horizontal = 20.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically) {
-                    Text(emoji(opt), fontSize = 22.sp); Spacer(Modifier.width(16.dp))
+                    Icon(Ic.of(icon(opt)), null, Modifier.size(24.dp),
+                        tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(18.dp))
                     Column {
                         Text(label(opt), fontSize = 16.sp)
                         if (sub(opt).isNotBlank()) Text(sub(opt), fontSize = 12.sp,
@@ -298,7 +352,7 @@ private fun <T> PickSheet(
 private fun ConfigDialog(title: String, canSave: Boolean = true, onDismiss: () -> Unit,
                          onSave: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     Dialog(onDismissRequest = onDismiss) {
-        Card(shape = RoundedCornerShape(24.dp)) {
+        Card(shape = RoundedCornerShape(28.dp)) {
             Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text(title, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 content()
@@ -312,8 +366,6 @@ private fun ConfigDialog(title: String, canSave: Boolean = true, onDismiss: () -
     }
 }
 
-// ---- On/Off + days + slider helpers ----
-
 @Composable
 private fun OnOff(label: String, on: Boolean, onChange: (Boolean) -> Unit,
                   onText: String = "On", offText: String = "Off") {
@@ -321,9 +373,9 @@ private fun OnOff(label: String, on: Boolean, onChange: (Boolean) -> Unit,
         Text(label, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
             SegmentedButton(selected = on, onClick = { onChange(true) },
-                shape = SegmentedButtonDefaults.itemShape(0, 2)) { Text(onText) }
+                shape = SegmentedButtonDefaults.itemShape(0, 2)) { Text(onText, maxLines = 1) }
             SegmentedButton(selected = !on, onClick = { onChange(false) },
-                shape = SegmentedButtonDefaults.itemShape(1, 2)) { Text(offText) }
+                shape = SegmentedButtonDefaults.itemShape(1, 2)) { Text(offText, maxLines = 1) }
         }
     }
 }
@@ -355,8 +407,7 @@ private fun PercentSlider(label: String, value: Int, onChange: (Int) -> Unit) {
 }
 
 @Composable
-private fun NumField(label: String, value: String, number: Boolean = false,
-                     onChange: (String) -> Unit) {
+private fun InputField(label: String, value: String, number: Boolean = false, onChange: (String) -> Unit) {
     OutlinedTextField(value = value, onValueChange = onChange, label = { Text(label) }, singleLine = true,
         keyboardOptions = KeyboardOptions(
             keyboardType = if (number) KeyboardType.Number else KeyboardType.Text),
@@ -368,7 +419,8 @@ private fun NumField(label: String, value: String, number: Boolean = false,
 // ============================================================================
 
 @Composable
-private fun TriggerConfig(kind: TriggerKind, existing: Trigger?, onDismiss: () -> Unit, onSave: (Trigger) -> Unit) {
+private fun TriggerConfig(kind: TriggerKind, existing: Trigger?, onDismiss: () -> Unit,
+                          onSave: (Trigger) -> Unit) {
     when (kind) {
         TriggerKind.TIME -> {
             val t = existing as? Trigger.TimeOfDay
@@ -390,14 +442,18 @@ private fun TriggerConfig(kind: TriggerKind, existing: Trigger?, onDismiss: () -
                 PercentSlider("Level", level) { level = it }
             }
         }
-        TriggerKind.POWER -> OnOffTrigger("Charging", existing, { (it as? Trigger.Power)?.connected ?: true },
-            { Trigger.Power(it) }, onDismiss, onSave, "Connected", "Disconnected")
-        TriggerKind.HEADSET -> OnOffTrigger("Headphones", existing, { (it as? Trigger.Headset)?.connected ?: true },
-            { Trigger.Headset(it) }, onDismiss, onSave, "Plugged in", "Unplugged")
-        TriggerKind.SCREEN -> OnOffTrigger("Screen", existing, { (it as? Trigger.Screen)?.on ?: true },
-            { Trigger.Screen(it) }, onDismiss, onSave, "Turns on", "Turns off")
-        TriggerKind.AIRPLANE -> OnOffTrigger("Airplane mode", existing, { (it as? Trigger.Airplane)?.on ?: true },
-            { Trigger.Airplane(it) }, onDismiss, onSave, "Turns on", "Turns off")
+        TriggerKind.POWER -> OnOffTrigger("Charging", existing,
+            { (it as? Trigger.Power)?.connected ?: true }, { Trigger.Power(it) },
+            onDismiss, onSave, "Connected", "Disconnected")
+        TriggerKind.HEADSET -> OnOffTrigger("Headphones", existing,
+            { (it as? Trigger.Headset)?.connected ?: true }, { Trigger.Headset(it) },
+            onDismiss, onSave, "Plugged in", "Unplugged")
+        TriggerKind.SCREEN -> OnOffTrigger("Screen", existing,
+            { (it as? Trigger.Screen)?.on ?: true }, { Trigger.Screen(it) },
+            onDismiss, onSave, "Turns on", "Turns off")
+        TriggerKind.AIRPLANE -> OnOffTrigger("Airplane mode", existing,
+            { (it as? Trigger.Airplane)?.on ?: true }, { Trigger.Airplane(it) },
+            onDismiss, onSave, "Turns on", "Turns off")
         TriggerKind.BLUETOOTH -> {
             val t = existing as? Trigger.Bluetooth
             var on by remember { mutableStateOf(t?.connected ?: true) }
@@ -405,7 +461,7 @@ private fun TriggerConfig(kind: TriggerKind, existing: Trigger?, onDismiss: () -
             ConfigDialog("Bluetooth device", onDismiss = onDismiss,
                 onSave = { onSave(Trigger.Bluetooth(on, dev.ifBlank { null })) }) {
                 OnOff("When a device", on, { on = it }, "Connects", "Disconnects")
-                NumField("Device name (blank = any)", dev) { dev = it }
+                InputField("Device name (blank = any)", dev) { dev = it }
             }
         }
         TriggerKind.WIFI -> {
@@ -415,30 +471,10 @@ private fun TriggerConfig(kind: TriggerKind, existing: Trigger?, onDismiss: () -
             ConfigDialog("Wi-Fi network", onDismiss = onDismiss,
                 onSave = { onSave(Trigger.Wifi(on, ssid.ifBlank { null })) }) {
                 OnOff("When Wi-Fi", on, { on = it }, "Connects", "Disconnects")
-                NumField("Network name / SSID (blank = any)", ssid) { ssid = it }
+                InputField("Network name / SSID (blank = any)", ssid) { ssid = it }
             }
         }
-        TriggerKind.LOCATION -> {
-            val t = existing as? Trigger.Location
-            var enter by remember { mutableStateOf(t?.enter ?: true) }
-            var place by remember { mutableStateOf(t?.place ?: "") }
-            var lat by remember { mutableStateOf(t?.lat?.toString() ?: "") }
-            var lng by remember { mutableStateOf(t?.lng?.toString() ?: "") }
-            var radius by remember { mutableStateOf((t?.radius ?: 200f).toString()) }
-            val ok = place.isNotBlank() && lat.toDoubleOrNull() != null && lng.toDoubleOrNull() != null
-            ConfigDialog("Location", canSave = ok, onDismiss = onDismiss, onSave = {
-                onSave(Trigger.Location(enter, lat.toDouble(), lng.toDouble(),
-                    radius.toFloatOrNull() ?: 200f, place))
-            }) {
-                OnOff("When you", enter, { enter = it }, "Arrive", "Leave")
-                NumField("Place name", place) { place = it }
-                NumField("Latitude", lat, number = true) { lat = it }
-                NumField("Longitude", lng, number = true) { lng = it }
-                NumField("Radius (metres)", radius, number = true) { radius = it }
-                Text("Tip: long-press a spot in Google Maps to copy its latitude, longitude.",
-                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
+        TriggerKind.LOCATION -> LocationConfig(existing as? Trigger.Location, onDismiss, onSave)
     }
 }
 
@@ -452,12 +488,52 @@ private fun OnOffTrigger(title: String, existing: Trigger?, get: (Trigger?) -> B
     }
 }
 
+/** Location trigger — opens the full-screen map picker instead of asking for coordinates. */
+@Composable
+private fun LocationConfig(existing: Trigger.Location?, onDismiss: () -> Unit, onSave: (Trigger) -> Unit) {
+    var enter by remember { mutableStateOf(existing?.enter ?: true) }
+    var place by remember { mutableStateOf(existing?.place ?: "") }
+    var lat by remember { mutableDoubleStateOf(existing?.lat ?: 0.0) }
+    var lng by remember { mutableDoubleStateOf(existing?.lng ?: 0.0) }
+    var radius by remember { mutableFloatStateOf(existing?.radius ?: 200f) }
+    var showMap by remember { mutableStateOf(false) }
+
+    if (showMap) {
+        Dialog(onDismissRequest = { showMap = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Surface(Modifier.fillMaxSize()) {
+                PlacePicker(
+                    initial = if (place.isNotBlank()) Trigger.Location(enter, lat, lng, radius, place) else null,
+                    onBack = { showMap = false },
+                    onDone = { p, la, ln, r ->
+                        place = p; lat = la; lng = ln; radius = r; showMap = false
+                    },
+                )
+            }
+        }
+        return
+    }
+
+    ConfigDialog("Location", canSave = place.isNotBlank(), onDismiss = onDismiss,
+        onSave = { onSave(Trigger.Location(enter, lat, lng, radius, place)) }) {
+        OnOff("When you", enter, { enter = it }, "Arrive", "Leave")
+        FilledTonalButton(onClick = { showMap = true }, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Filled.Map, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(if (place.isBlank()) "Pick a place on the map" else "Change place")
+        }
+        if (place.isNotBlank()) Text("$place · ${radius.toInt()} m radius",
+            fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
 // ============================================================================
 //  Action config
 // ============================================================================
 
 @Composable
-private fun ActionConfig(kind: ActionKind, existing: Action?, onDismiss: () -> Unit, onSave: (Action) -> Unit) {
+private fun ActionConfig(kind: ActionKind, existing: Action?, onDismiss: () -> Unit,
+                         onSave: (Action) -> Unit) {
     when (kind) {
         ActionKind.RINGER -> {
             var mode by remember { mutableStateOf((existing as? Action.Ringer)?.mode ?: RingerMode.SILENT) }
@@ -472,8 +548,8 @@ private fun ActionConfig(kind: ActionKind, existing: Action?, onDismiss: () -> U
                 }
             }
         }
-        ActionKind.DND -> OnOffAction("Do Not Disturb", existing, { (it as? Action.Dnd)?.on ?: true },
-            { Action.Dnd(it) }, onDismiss, onSave)
+        ActionKind.DND -> OnOffAction("Do Not Disturb", existing,
+            { (it as? Action.Dnd)?.on ?: true }, { Action.Dnd(it) }, onDismiss, onSave)
         ActionKind.VOLUME -> {
             val a = existing as? Action.Volume
             var stream by remember { mutableStateOf(a?.stream ?: StreamType.MEDIA) }
@@ -495,31 +571,36 @@ private fun ActionConfig(kind: ActionKind, existing: Action?, onDismiss: () -> U
             ConfigDialog("Brightness", onDismiss = onDismiss,
                 onSave = { onSave(Action.Brightness(pct)) }) { PercentSlider("Level", pct) { pct = it } }
         }
-        ActionKind.ROTATE -> OnOffAction("Auto-rotate", existing, { (it as? Action.AutoRotate)?.on ?: true },
-            { Action.AutoRotate(it) }, onDismiss, onSave)
-        ActionKind.DARK -> OnOffAction("Dark theme", existing, { (it as? Action.DarkTheme)?.on ?: true },
-            { Action.DarkTheme(it) }, onDismiss, onSave, note = "Needs the one-time ADB grant (see Settings).")
-        ActionKind.SAVER -> OnOffAction("Battery Saver", existing, { (it as? Action.BatterySaver)?.on ?: true },
-            { Action.BatterySaver(it) }, onDismiss, onSave, note = "Needs the one-time ADB grant.")
-        ActionKind.WIFI -> OnOffAction("Wi-Fi", existing, { (it as? Action.WifiToggle)?.on ?: true },
-            { Action.WifiToggle(it) }, onDismiss, onSave, note = "Needs Shizuku (coming soon).")
-        ActionKind.BLUETOOTH -> OnOffAction("Bluetooth", existing, { (it as? Action.BluetoothToggle)?.on ?: true },
-            { Action.BluetoothToggle(it) }, onDismiss, onSave, note = "Needs Shizuku (coming soon).")
-        ActionKind.AIRPLANE -> OnOffAction("Airplane mode", existing, { (it as? Action.AirplaneToggle)?.on ?: true },
-            { Action.AirplaneToggle(it) }, onDismiss, onSave, note = "Needs Shizuku (coming soon).")
-        ActionKind.FLASH -> OnOffAction("Flashlight", existing, { (it as? Action.Flashlight)?.on ?: true },
-            { Action.Flashlight(it) }, onDismiss, onSave)
+        ActionKind.ROTATE -> OnOffAction("Auto-rotate", existing,
+            { (it as? Action.AutoRotate)?.on ?: true }, { Action.AutoRotate(it) }, onDismiss, onSave)
+        ActionKind.DARK -> OnOffAction("Dark theme", existing,
+            { (it as? Action.DarkTheme)?.on ?: true }, { Action.DarkTheme(it) }, onDismiss, onSave,
+            note = "Needs the one-time ADB grant — see Settings.")
+        ActionKind.SAVER -> OnOffAction("Battery Saver", existing,
+            { (it as? Action.BatterySaver)?.on ?: true }, { Action.BatterySaver(it) }, onDismiss, onSave,
+            note = "Needs the one-time ADB grant — see Settings.")
+        ActionKind.WIFI -> OnOffAction("Wi-Fi", existing,
+            { (it as? Action.WifiToggle)?.on ?: true }, { Action.WifiToggle(it) }, onDismiss, onSave,
+            note = "Needs Shizuku — set it up in Settings.")
+        ActionKind.BLUETOOTH -> OnOffAction("Bluetooth", existing,
+            { (it as? Action.BluetoothToggle)?.on ?: true }, { Action.BluetoothToggle(it) },
+            onDismiss, onSave, note = "Needs Shizuku — set it up in Settings.")
+        ActionKind.AIRPLANE -> OnOffAction("Airplane mode", existing,
+            { (it as? Action.AirplaneToggle)?.on ?: true }, { Action.AirplaneToggle(it) },
+            onDismiss, onSave, note = "Needs Shizuku — set it up in Settings.")
+        ActionKind.FLASH -> OnOffAction("Flashlight", existing,
+            { (it as? Action.Flashlight)?.on ?: true }, { Action.Flashlight(it) }, onDismiss, onSave)
         ActionKind.APP -> {
             val ctx = LocalContext.current
             val apps = remember { Apps.installed(ctx) }
             var query by remember { mutableStateOf("") }
             ConfigDialog("Open an app", canSave = false, onDismiss = onDismiss, onSave = {}) {
-                NumField("Search", query) { query = it }
+                InputField("Search", query) { query = it }
                 LazyColumn(Modifier.heightIn(max = 320.dp)) {
                     items(apps.filter { it.label.contains(query, true) }) { app ->
-                        Row(Modifier.fillMaxWidth().clickable {
-                            onSave(Action.LaunchApp(app.pkg, app.label))
-                        }.padding(vertical = 12.dp)) { Text(app.label, fontSize = 15.sp) }
+                        Row(Modifier.fillMaxWidth()
+                            .clickable { onSave(Action.LaunchApp(app.pkg, app.label)) }
+                            .padding(vertical = 12.dp)) { Text(app.label, fontSize = 15.sp) }
                     }
                 }
             }
@@ -530,8 +611,8 @@ private fun ActionConfig(kind: ActionKind, existing: Action?, onDismiss: () -> U
             var text by remember { mutableStateOf(a?.text ?: "") }
             ConfigDialog("Show a reminder", canSave = title.isNotBlank(), onDismiss = onDismiss,
                 onSave = { onSave(Action.Notify(title, text)) }) {
-                NumField("Title", title) { title = it }
-                NumField("Message", text) { text = it }
+                InputField("Title", title) { title = it }
+                InputField("Message", text) { text = it }
             }
         }
     }
@@ -553,7 +634,8 @@ private fun OnOffAction(title: String, existing: Action?, get: (Action?) -> Bool
 // ============================================================================
 
 @Composable
-private fun ConditionConfig(kind: ConditionKind, existing: Condition?, onDismiss: () -> Unit, onSave: (Condition) -> Unit) {
+private fun ConditionConfig(kind: ConditionKind, existing: Condition?, onDismiss: () -> Unit,
+                            onSave: (Condition) -> Unit) {
     when (kind) {
         ConditionKind.DAYS -> {
             var days by remember { mutableStateOf((existing as? Condition.OnDays)?.days ?: (1..7).toSet()) }
@@ -574,7 +656,9 @@ private fun ConditionConfig(kind: ConditionKind, existing: Condition?, onDismiss
         ConditionKind.BATTERY -> {
             var level by remember { mutableIntStateOf((existing as? Condition.BatteryUnder)?.level ?: 30) }
             ConfigDialog("Battery under", onDismiss = onDismiss,
-                onSave = { onSave(Condition.BatteryUnder(level)) }) { PercentSlider("Level", level) { level = it } }
+                onSave = { onSave(Condition.BatteryUnder(level)) }) {
+                PercentSlider("Level", level) { level = it }
+            }
         }
         ConditionKind.CHARGING -> {
             var charging by remember { mutableStateOf((existing as? Condition.WhileCharging)?.charging ?: true) }
@@ -586,24 +670,23 @@ private fun ConditionConfig(kind: ConditionKind, existing: Condition?, onDismiss
     }
 }
 
-// ---- Emoji picker ----
+// ---- Icon picker ----
 
 @Composable
-private fun EmojiDialog(onPick: (String) -> Unit, onDismiss: () -> Unit) {
-    val emojis = listOf("✨","🌙","🌅","📚","🔋","🚗","🏠","🎧","🎓","💤","🏢","🏋️","🍿","🎮",
-        "📵","🔔","☀️","🌑","📶","✈️","🛏️","☕","🎬","🧘")
+private fun IconPickerDialog(onPick: (String) -> Unit, onDismiss: () -> Unit) {
     Dialog(onDismissRequest = onDismiss) {
-        Card(shape = RoundedCornerShape(24.dp)) {
+        Card(shape = RoundedCornerShape(28.dp)) {
             Column(Modifier.padding(20.dp)) {
                 Text("Choose an icon", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(12.dp))
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    emojis.forEach { e ->
-                        Box(Modifier.size(48.dp).clip(CircleShape)
+                    Ic.routinePicker.forEach { key ->
+                        Box(Modifier.size(50.dp).clip(CircleShape)
                             .background(MaterialTheme.colorScheme.surfaceVariant)
-                            .clickable { onPick(e) }, contentAlignment = Alignment.Center) {
-                            Text(e, fontSize = 24.sp)
+                            .clickable { onPick(key) }, contentAlignment = Alignment.Center) {
+                            Icon(Ic.of(key), key, Modifier.size(24.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
@@ -650,7 +733,7 @@ private fun kindOfCond(c: Condition): ConditionKind = when (c) {
 }
 
 private fun accessBadge(a: Access): String? = when (a) {
-    Access.SHIZUKU -> "needs Shizuku setup"
+    Access.SHIZUKU -> "needs Shizuku"
     Access.SECURE_SETTINGS -> "needs ADB grant"
     else -> null
 }

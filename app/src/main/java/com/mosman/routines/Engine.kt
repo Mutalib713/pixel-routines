@@ -9,29 +9,39 @@ import java.time.LocalTime
 import java.time.ZonedDateTime
 
 /**
- * The automation core. Arms each enabled routine's triggers (alarms, geofences, live
- * events) and, when one fires, checks the conditions and runs the actions.
+ * The automation core. Arms each enabled routine's start and end triggers (alarms,
+ * geofences, live events); when one fires it checks the conditions and runs the actions,
+ * or ends the routine and puts the settings back.
  */
 object Engine {
+
+    /** Alarm/geofence indices 0..7 are start triggers, 8..15 are end triggers. */
+    const val END_OFFSET = 8
 
     fun rearmAll(ctx: Context) {
         val routines = Store.load(ctx)
         routines.forEach { disarm(ctx, it) }
         routines.filter { it.enabled }.forEach { arm(ctx, it) }
-        // Keep the live-event service running only if something needs it.
-        val needsService = routines.any { it.enabled && it.triggers.any { t -> isEventTrigger(t) } }
+
+        val needsService = routines.any { r ->
+            r.enabled && (r.triggers.any(::isEventTrigger) || r.endTriggers.any(::isEventTrigger))
+        }
         if (needsService) EventService.start(ctx) else EventService.stop(ctx)
-        val needsGeo = routines.any { it.enabled && it.triggers.any { t -> t is Trigger.Location } }
-        if (needsGeo) Geofences.syncAll(ctx)
+
+        if (routines.any { r -> r.enabled && (r.triggers + r.endTriggers).any { it is Trigger.Location } })
+            Geofences.syncAll(ctx)
     }
 
     fun arm(ctx: Context, r: Routine) {
-        r.triggers.forEachIndexed { i, t ->
-            when (t) {
-                is Trigger.TimeOfDay -> Scheduler.scheduleTime(ctx, r, i, t)
-                is Trigger.Location -> Geofences.add(ctx, r, i, t)
-                else -> Unit // event triggers handled by EventService
-            }
+        r.triggers.take(END_OFFSET).forEachIndexed { i, t -> armOne(ctx, r, i, t) }
+        r.endTriggers.take(END_OFFSET).forEachIndexed { i, t -> armOne(ctx, r, END_OFFSET + i, t) }
+    }
+
+    private fun armOne(ctx: Context, r: Routine, index: Int, t: Trigger) {
+        when (t) {
+            is Trigger.TimeOfDay -> Scheduler.scheduleTime(ctx, r, index, t)
+            is Trigger.Location -> Geofences.add(ctx, r, index, t)
+            else -> Unit // event triggers are handled by EventService
         }
     }
 
@@ -42,37 +52,76 @@ object Engine {
 
     // ---- Firing paths --------------------------------------------------------
 
-    /** Called by AlarmReceiver when a time trigger elapses. */
     fun onTimeFired(ctx: Context, id: Long, index: Int) {
         val r = Store.get(ctx, id) ?: return
-        if (r.enabled) fireRoutine(ctx, r)
-        // Re-arm this recurring time trigger for its next occurrence.
-        (r.triggers.getOrNull(index) as? Trigger.TimeOfDay)?.let { Scheduler.scheduleTime(ctx, r, index, it) }
+        if (!r.enabled) return
+        if (index >= END_OFFSET) {
+            endRoutine(ctx, r)
+            (r.endTriggers.getOrNull(index - END_OFFSET) as? Trigger.TimeOfDay)
+                ?.let { Scheduler.scheduleTime(ctx, r, index, it) }
+        } else {
+            fireRoutine(ctx, r)
+            (r.triggers.getOrNull(index) as? Trigger.TimeOfDay)
+                ?.let { Scheduler.scheduleTime(ctx, r, index, it) }
+        }
     }
 
-    /** Called by GeofenceReceiver. */
-    fun onGeofence(ctx: Context, id: Long, enter: Boolean) {
+    fun onGeofence(ctx: Context, id: Long, index: Int, enter: Boolean) {
         val r = Store.get(ctx, id) ?: return
-        val matches = r.enabled && r.triggers.any { it is Trigger.Location && it.enter == enter }
-        if (matches) fireRoutine(ctx, r)
+        if (!r.enabled) return
+        val list = if (index >= END_OFFSET) r.endTriggers else r.triggers
+        val t = list.getOrNull(if (index >= END_OFFSET) index - END_OFFSET else index) as? Trigger.Location
+            ?: return
+        if (t.enter != enter) return
+        if (index >= END_OFFSET) endRoutine(ctx, r) else fireRoutine(ctx, r)
     }
 
-    /** Called by EventService for live device events. */
+    /** Live device events from EventService. */
     fun handleEvent(ctx: Context, matcher: (Trigger) -> Boolean) {
-        Store.load(ctx).filter { it.enabled && it.triggers.any(matcher) }
-            .forEach { fireRoutine(ctx, it) }
+        Store.load(ctx).filter { it.enabled }.forEach { r ->
+            when {
+                r.triggers.any(matcher) -> fireRoutine(ctx, r)
+                r.endTriggers.any(matcher) -> endRoutine(ctx, r)
+            }
+        }
     }
 
     /** Runs a routine if its conditions and match rule pass right now. */
     fun fireRoutine(ctx: Context, r: Routine) {
         if (!conditionsMet(ctx, r)) return
         if (r.match == Match.ALL && !allStateTriggersTrue(ctx, r)) return
+
+        // Remember the "before" state so the end condition can put it back.
+        if (r.hasEnd && r.endMode == EndMode.REVERT)
+            Snapshot.save(ctx, r.id, Snapshot.capture(ctx, r))
+
         val results = Actions.runAll(ctx, r)
+        if (r.hasEnd) Store.setActive(ctx, r.id, true)
         Actions.notifyRan(ctx, r, results)
+        RoutinesWidget.refresh(ctx)
+    }
+
+    /** Ends a running routine: undo, run end actions, or leave things alone. */
+    fun endRoutine(ctx: Context, r: Routine) {
+        val results = when (r.endMode) {
+            EndMode.REVERT -> Snapshot.load(ctx, r.id).map { Actions.runOne(ctx, it) }
+            EndMode.CUSTOM -> r.endActions.map { Actions.runOne(ctx, it) }
+            EndMode.NOTHING -> emptyList()
+        }
+        Snapshot.clear(ctx, r.id)
+        Store.setActive(ctx, r.id, false)
+        if (results.isNotEmpty()) Actions.notifyEnded(ctx, r, results)
+        RoutinesWidget.refresh(ctx)
     }
 
     /** Manual "Run now" — skips trigger/condition checks. */
-    fun runNow(ctx: Context, r: Routine): List<String> = Actions.runAll(ctx, r)
+    fun runNow(ctx: Context, r: Routine): List<String> {
+        if (r.hasEnd && r.endMode == EndMode.REVERT)
+            Snapshot.save(ctx, r.id, Snapshot.capture(ctx, r))
+        val out = Actions.runAll(ctx, r)
+        if (r.hasEnd) { Store.setActive(ctx, r.id, true); RoutinesWidget.refresh(ctx) }
+        return out
+    }
 
     // ---- Condition + state evaluation ---------------------------------------
 
@@ -81,8 +130,7 @@ object Engine {
         return r.conditions.all { c ->
             when (c) {
                 is Condition.OnDays -> c.days.contains(now.dayOfWeek.value)
-                is Condition.BetweenHours -> inWindow(
-                    LocalTime.now(),
+                is Condition.BetweenHours -> inWindow(LocalTime.now(),
                     LocalTime.of(c.startH, c.startM), LocalTime.of(c.endH, c.endM))
                 is Condition.BatteryUnder -> State.batteryLevel(ctx) < c.level
                 is Condition.WhileCharging -> State.charging(ctx) == c.charging
@@ -121,7 +169,6 @@ object State {
     fun headsetOn(ctx: Context): Boolean =
         ctx.getSystemService(AudioManager::class.java).isWiredHeadsetOn
 
-    /** True/false for stateful triggers, null for event-only (time, location, bluetooth). */
     fun isTrue(ctx: Context, t: Trigger): Boolean? = when (t) {
         is Trigger.Battery -> if (t.below) batteryLevel(ctx) < t.level else batteryLevel(ctx) > t.level
         is Trigger.Power -> charging(ctx) == t.connected

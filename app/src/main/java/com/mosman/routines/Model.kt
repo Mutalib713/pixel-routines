@@ -26,88 +26,86 @@ enum class Match { ANY, ALL;
     fun label() = if (this == ANY) "Any of these" else "All of these"
 }
 
+/** What happens when a routine's end condition is met (Samsung-style). */
+enum class EndMode { NOTHING, REVERT, CUSTOM;
+    fun label() = when (this) {
+        NOTHING -> "Leave as is"
+        REVERT -> "Undo the changes"
+        CUSTOM -> "Run other actions"
+    }
+    fun describe() = when (this) {
+        NOTHING -> "keep the settings"
+        REVERT -> "put the settings back"
+        CUSTOM -> "run the end actions"
+    }
+}
+
 // ============================================================================
 //  Triggers  (the "IF")
 // ============================================================================
 
 sealed class Trigger {
     abstract fun describe(): String
-    abstract fun icon(): String   // emoji shown in pickers/summaries
+    abstract fun icon(): String
     abstract fun toJson(): JSONObject
 
-    /** Time of day on selected weekdays (ISO 1=Mon..7=Sun). */
     data class TimeOfDay(val hour: Int, val minute: Int, val days: Set<Int>) : Trigger() {
-        override fun icon() = "⏰"
-        override fun describe(): String {
-            val t = LocalTime.of(hour, minute).toString()
-            return "At $t on ${daysLabel(days)}"
-        }
+        override fun icon() = "schedule"
+        override fun describe() = "At ${LocalTime.of(hour, minute)} on ${daysLabel(days)}"
         override fun toJson() = JSONObject().put("t", "time").put("h", hour).put("m", minute)
             .put("days", JSONArray(days.toList()))
     }
 
-    /** Battery crosses a level. */
     data class Battery(val below: Boolean, val level: Int) : Trigger() {
-        override fun icon() = "🔋"
+        override fun icon() = "battery"
         override fun describe() = "Battery ${if (below) "drops below" else "rises above"} $level%"
         override fun toJson() = JSONObject().put("t", "battery").put("below", below).put("level", level)
     }
 
-    /** Charger connected / disconnected. */
     data class Power(val connected: Boolean) : Trigger() {
-        override fun icon() = "🔌"
+        override fun icon() = "power"
         override fun describe() = if (connected) "Charger connected" else "Charger disconnected"
         override fun toJson() = JSONObject().put("t", "power").put("on", connected)
     }
 
-    /** Wired headphones plugged / unplugged. */
     data class Headset(val connected: Boolean) : Trigger() {
-        override fun icon() = "🎧"
+        override fun icon() = "headphones"
         override fun describe() = if (connected) "Headphones plugged in" else "Headphones unplugged"
         override fun toJson() = JSONObject().put("t", "headset").put("on", connected)
     }
 
-    /** Bluetooth device connects / disconnects. name == null → any device. */
     data class Bluetooth(val connected: Boolean, val deviceName: String?) : Trigger() {
-        override fun icon() = "🔵"
-        override fun describe(): String {
-            val who = deviceName ?: "any device"
-            return "Bluetooth $who ${if (connected) "connects" else "disconnects"}"
-        }
+        override fun icon() = "bluetooth"
+        override fun describe() =
+            "Bluetooth ${deviceName ?: "any device"} ${if (connected) "connects" else "disconnects"}"
         override fun toJson() = JSONObject().put("t", "bt").put("on", connected)
             .put("name", deviceName ?: JSONObject.NULL)
     }
 
-    /** Joins / leaves a Wi-Fi network. ssid == null → any network. */
     data class Wifi(val connected: Boolean, val ssid: String?) : Trigger() {
-        override fun icon() = "📶"
-        override fun describe(): String {
-            val net = ssid ?: "any network"
-            return "Wi-Fi $net ${if (connected) "connects" else "disconnects"}"
-        }
+        override fun icon() = "wifi"
+        override fun describe() =
+            "Wi-Fi ${ssid ?: "any network"} ${if (connected) "connects" else "disconnects"}"
         override fun toJson() = JSONObject().put("t", "wifi").put("on", connected)
             .put("ssid", ssid ?: JSONObject.NULL)
     }
 
-    /** Enter / exit a place (geofence). */
     data class Location(val enter: Boolean, val lat: Double, val lng: Double,
                         val radius: Float, val place: String) : Trigger() {
-        override fun icon() = "📍"
+        override fun icon() = "location"
         override fun describe() = "${if (enter) "Arrive at" else "Leave"} $place"
         override fun toJson() = JSONObject().put("t", "loc").put("enter", enter)
             .put("lat", lat).put("lng", lng).put("radius", radius).put("place", place)
     }
 
-    /** Screen turns on / off. */
     data class Screen(val on: Boolean) : Trigger() {
-        override fun icon() = "📱"
+        override fun icon() = "screen"
         override fun describe() = if (on) "Screen turns on" else "Screen turns off"
         override fun toJson() = JSONObject().put("t", "screen").put("on", on)
     }
 
-    /** Airplane mode turns on / off. */
     data class Airplane(val on: Boolean) : Trigger() {
-        override fun icon() = "✈️"
+        override fun icon() = "flight"
         override fun describe() = "Airplane mode turns ${if (on) "on" else "off"}"
         override fun toJson() = JSONObject().put("t", "air").put("on", on)
     }
@@ -142,8 +140,7 @@ sealed class Condition {
         override fun toJson() = JSONObject().put("c", "days").put("days", JSONArray(days.toList()))
     }
     data class BetweenHours(val startH: Int, val startM: Int, val endH: Int, val endM: Int) : Condition() {
-        override fun describe() =
-            "between ${LocalTime.of(startH, startM)} and ${LocalTime.of(endH, endM)}"
+        override fun describe() = "between ${LocalTime.of(startH, startM)} and ${LocalTime.of(endH, endM)}"
         override fun toJson() = JSONObject().put("c", "window")
             .put("sh", startH).put("sm", startM).put("eh", endH).put("em", endM)
     }
@@ -171,7 +168,6 @@ sealed class Condition {
 //  Actions  (the "THEN")
 // ============================================================================
 
-/** Access a given action needs, so the UI can show a status chip. */
 enum class Access { NONE, DND, WRITE_SETTINGS, SECURE_SETTINGS, SHIZUKU }
 
 sealed class Action {
@@ -181,80 +177,80 @@ sealed class Action {
     abstract fun toJson(): JSONObject
 
     data class Ringer(val mode: RingerMode) : Action() {
-        override fun icon() = "🔕"
+        override fun icon() = "ringer"
         override fun describe() = "Set ringer to ${mode.label().lowercase()}"
         override fun access() = Access.DND
         override fun toJson() = JSONObject().put("a", "ringer").put("mode", mode.name)
     }
     data class Dnd(val on: Boolean) : Action() {
-        override fun icon() = "🌙"
+        override fun icon() = "dnd"
         override fun describe() = "Turn Do Not Disturb ${onOff(on)}"
         override fun access() = Access.DND
         override fun toJson() = JSONObject().put("a", "dnd").put("on", on)
     }
     data class Volume(val stream: StreamType, val percent: Int) : Action() {
-        override fun icon() = "🔊"
+        override fun icon() = "volume"
         override fun describe() = "${stream.label()} volume to $percent%"
         override fun access() = if (stream == StreamType.RING || stream == StreamType.NOTIFICATION)
             Access.DND else Access.NONE
         override fun toJson() = JSONObject().put("a", "vol").put("stream", stream.name).put("pct", percent)
     }
     data class Brightness(val percent: Int) : Action() {
-        override fun icon() = "💡"
+        override fun icon() = "brightness"
         override fun describe() = "Brightness to $percent%"
         override fun access() = Access.WRITE_SETTINGS
         override fun toJson() = JSONObject().put("a", "bright").put("pct", percent)
     }
     data class AutoRotate(val on: Boolean) : Action() {
-        override fun icon() = "🔄"
+        override fun icon() = "rotate"
         override fun describe() = "Auto-rotate ${onOff(on)}"
         override fun access() = Access.WRITE_SETTINGS
         override fun toJson() = JSONObject().put("a", "rotate").put("on", on)
     }
     data class DarkTheme(val on: Boolean) : Action() {
-        override fun icon() = "🌑"
+        override fun icon() = "dark"
         override fun describe() = "Dark theme ${onOff(on)}"
         override fun access() = Access.SECURE_SETTINGS
         override fun toJson() = JSONObject().put("a", "dark").put("on", on)
     }
     data class BatterySaver(val on: Boolean) : Action() {
-        override fun icon() = "🪫"
+        override fun icon() = "saver"
         override fun describe() = "Battery Saver ${onOff(on)}"
         override fun access() = Access.SECURE_SETTINGS
         override fun toJson() = JSONObject().put("a", "saver").put("on", on)
     }
     data class WifiToggle(val on: Boolean) : Action() {
-        override fun icon() = "📶"
+        override fun icon() = "wifi"
         override fun describe() = "Turn Wi-Fi ${onOff(on)}"
         override fun access() = Access.SHIZUKU
         override fun toJson() = JSONObject().put("a", "wifi").put("on", on)
     }
     data class BluetoothToggle(val on: Boolean) : Action() {
-        override fun icon() = "🔵"
+        override fun icon() = "bluetooth"
         override fun describe() = "Turn Bluetooth ${onOff(on)}"
         override fun access() = Access.SHIZUKU
         override fun toJson() = JSONObject().put("a", "bt").put("on", on)
     }
     data class AirplaneToggle(val on: Boolean) : Action() {
-        override fun icon() = "✈️"
+        override fun icon() = "flight"
         override fun describe() = "Turn Airplane mode ${onOff(on)}"
         override fun access() = Access.SHIZUKU
         override fun toJson() = JSONObject().put("a", "air").put("on", on)
     }
     data class LaunchApp(val pkg: String, val label: String) : Action() {
-        override fun icon() = "📲"
+        override fun icon() = "app"
         override fun describe() = "Open $label"
         override fun access() = Access.NONE
         override fun toJson() = JSONObject().put("a", "app").put("pkg", pkg).put("label", label)
     }
     data class Flashlight(val on: Boolean) : Action() {
-        override fun icon() = "🔦"
+        override fun icon() = "flash"
         override fun describe() = "Flashlight ${onOff(on)}"
         override fun access() = Access.NONE
         override fun toJson() = JSONObject().put("a", "flash").put("on", on)
     }
     data class Notify(val title: String, val text: String) : Action() {
-        override fun icon() = "🔔"
+        override fun icon() = "notify"
         override fun describe() = "Notify: $title"
         override fun access() = Access.NONE
         override fun toJson() = JSONObject().put("a", "notify").put("title", title).put("text", text)
@@ -287,45 +283,60 @@ sealed class Action {
 data class Routine(
     val id: Long,
     val name: String,
-    val emoji: String = "✨",
+    val icon: String = "star",
     val enabled: Boolean = true,
     val match: Match = Match.ANY,
     val triggers: List<Trigger> = emptyList(),
     val conditions: List<Condition> = emptyList(),
     val actions: List<Action> = emptyList(),
+    // --- Ending (Samsung-style) ---
+    val endTriggers: List<Trigger> = emptyList(),
+    val endMode: EndMode = EndMode.REVERT,
+    val endActions: List<Action> = emptyList(),
 ) {
     val isValid get() = triggers.isNotEmpty() && actions.isNotEmpty()
+    val hasEnd get() = endTriggers.isNotEmpty()
 
     fun ifSummary(): String =
         if (triggers.isEmpty()) "No trigger yet"
-        else triggers.joinToString(
-            separator = if (match == Match.ALL) "  and  " else "  or  "
-        ) { it.describe() }
+        else triggers.joinToString(if (match == Match.ALL) "  and  " else "  or  ") { it.describe() }
 
     fun thenSummary(): String =
         if (actions.isEmpty()) "No actions yet" else actions.joinToString(", ") { it.describe() }
 
+    fun endSummary(): String? {
+        if (endTriggers.isEmpty()) return null
+        val when_ = endTriggers.joinToString(" or ") { it.describe() }
+        return "$when_ → ${endMode.describe()}"
+    }
+
     fun toJson(): JSONObject = JSONObject().apply {
-        put("id", id); put("name", name); put("emoji", emoji); put("enabled", enabled)
+        put("id", id); put("name", name); put("icon", icon); put("enabled", enabled)
         put("match", match.name)
         put("triggers", JSONArray().apply { triggers.forEach { put(it.toJson()) } })
         put("conditions", JSONArray().apply { conditions.forEach { put(it.toJson()) } })
         put("actions", JSONArray().apply { actions.forEach { put(it.toJson()) } })
+        put("endTriggers", JSONArray().apply { endTriggers.forEach { put(it.toJson()) } })
+        put("endMode", endMode.name)
+        put("endActions", JSONArray().apply { endActions.forEach { put(it.toJson()) } })
     }
 
     companion object {
         fun fromJson(o: JSONObject) = Routine(
             id = o.getLong("id"),
             name = o.optString("name", "Routine"),
-            emoji = o.optString("emoji", "✨"),
+            icon = o.optString("icon", "star"),
             enabled = o.optBoolean("enabled", true),
             match = runCatching { Match.valueOf(o.optString("match")) }.getOrDefault(Match.ANY),
             triggers = o.optJSONArray("triggers").items { Trigger.fromJson(it) },
             conditions = o.optJSONArray("conditions").items { Condition.fromJson(it) },
             actions = o.optJSONArray("actions").items { Action.fromJson(it) },
+            endTriggers = o.optJSONArray("endTriggers").items { Trigger.fromJson(it) },
+            endMode = runCatching { EndMode.valueOf(o.optString("endMode")) }.getOrDefault(EndMode.REVERT),
+            endActions = o.optJSONArray("endActions").items { Action.fromJson(it) },
         )
 
-        fun new() = Routine(id = System.currentTimeMillis(), name = "", emoji = "✨")
+        fun new() = Routine(id = System.currentTimeMillis(), name = "", icon = "star")
     }
 }
 

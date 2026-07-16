@@ -48,5 +48,13 @@ dependencies {
     implementation("androidx.compose.foundation:foundation:1.9.0")
     implementation("androidx.compose.material3:material3:1.4.0")
     implementation("androidx.compose.material:material-icons-core:1.7.8")
+    // Real Material Symbols for every trigger/action/routine icon (no emoji).
+    implementation("androidx.compose.material:material-icons-extended:1.7.8")
+    // Geofencing + "use my current location" in the place picker.
     implementation("com.google.android.gms:play-services-location:21.3.0")
+    // In-app map for picking a place — OpenStreetMap, needs no API key.
+    implementation("org.osmdroid:osmdroid-android:6.1.20")
+    // Shizuku: ADB-level shell for the restricted Wi-Fi/Bluetooth/airplane toggles.
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
 }
