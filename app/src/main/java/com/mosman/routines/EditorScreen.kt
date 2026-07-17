@@ -92,7 +92,6 @@ fun EditorScreen(
     var match by remember { mutableStateOf(initial.match) }
     var endMode by remember { mutableStateOf(initial.endMode) }
     var notifyOnRun by remember { mutableStateOf(initial.notifyOnRun) }
-    var notifyOnRun by remember { mutableStateOf(initial.notifyOnRun) }
     val triggers = remember { mutableStateListOf<Trigger>().apply { addAll(initial.triggers) } }
     val conditions = remember { mutableStateListOf<Condition>().apply { addAll(initial.conditions) } }
     val actions = remember { mutableStateListOf<Action>().apply { addAll(initial.actions) } }
