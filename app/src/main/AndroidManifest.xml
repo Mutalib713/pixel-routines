@@ -100,6 +100,18 @@
             android:exported="false"
             android:permission="android.permission.BIND_REMOTEVIEWS" />
 
+        <!-- Quick Settings tile: pause/resume all routines -->
+        <service
+            android:name=".RoutinesTile"
+            android:exported="true"
+            android:icon="@drawable/ic_stat"
+            android:label="Routines"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
         <!-- Shizuku entry point -->
         <provider
             android:name="rikka.shizuku.ShizukuProvider"

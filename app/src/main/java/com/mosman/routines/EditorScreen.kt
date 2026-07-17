@@ -40,6 +40,7 @@ fun BackIcon() = Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = 
 
 private enum class TriggerKind(val icon: String, val label: String, val sub: String) {
     TIME("schedule", "Time of day", "At a set time on chosen days"),
+    SUN("sunny", "Sunrise / sunset", "Follows the sun, with an offset"),
     BATTERY("battery", "Battery level", "Drops below / rises above a %"),
     POWER("power", "Charging", "Charger connected or unplugged"),
     HEADSET("headphones", "Headphones", "Wired headset plugged/unplugged"),
@@ -62,8 +63,11 @@ private enum class ActionKind(val icon: String, val label: String, val access: A
     BLUETOOTH("bluetooth", "Bluetooth on/off", Access.SHIZUKU),
     AIRPLANE("flight", "Airplane on/off", Access.SHIZUKU),
     APP("app", "Open an app", Access.NONE),
+    WEBSITE("app", "Open a website", Access.NONE),
+    MEDIA("music", "Media control", Access.NONE),
     FLASH("flash", "Flashlight", Access.NONE),
     NOTIFY("notify", "Show a reminder", Access.NONE),
+    WAIT("schedule", "Wait between actions", Access.NONE),
 }
 
 private enum class ConditionKind(val label: String) {
@@ -87,6 +91,8 @@ fun EditorScreen(
     var icon by remember { mutableStateOf(initial.icon) }
     var match by remember { mutableStateOf(initial.match) }
     var endMode by remember { mutableStateOf(initial.endMode) }
+    var notifyOnRun by remember { mutableStateOf(initial.notifyOnRun) }
+    var notifyOnRun by remember { mutableStateOf(initial.notifyOnRun) }
     val triggers = remember { mutableStateListOf<Trigger>().apply { addAll(initial.triggers) } }
     val conditions = remember { mutableStateListOf<Condition>().apply { addAll(initial.conditions) } }
     val actions = remember { mutableStateListOf<Action>().apply { addAll(initial.actions) } }
@@ -104,7 +110,7 @@ fun EditorScreen(
     var editCondition by remember { mutableStateOf<Pair<ConditionKind, Int?>?>(null) }
 
     fun result() = initial.copy(
-        name = name.ifBlank { "Routine" }, icon = icon, match = match,
+        name = name.ifBlank { "Routine" }, icon = icon, match = match, notifyOnRun = notifyOnRun,
         triggers = triggers.toList(), conditions = conditions.toList(), actions = actions.toList(),
         endTriggers = endTriggers.toList(), endMode = endMode, endActions = endActions.toList(),
     )
@@ -222,6 +228,19 @@ fun EditorScreen(
                             badge = accessBadge(a.access()))
                     }
                     AddButton("Add end action") { actionSheetFor = true }
+                }
+            }
+
+            // Notify toggle
+            Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+                Row(Modifier.padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Notify when it runs", fontSize = 15.sp)
+                        Text("Turn off for a routine that should work quietly",
+                            fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(checked = notifyOnRun, onCheckedChange = { notifyOnRun = it })
                 }
             }
 
@@ -475,6 +494,61 @@ private fun TriggerConfig(kind: TriggerKind, existing: Trigger?, onDismiss: () -
             }
         }
         TriggerKind.LOCATION -> LocationConfig(existing as? Trigger.Location, onDismiss, onSave)
+        TriggerKind.SUN -> SunConfig(existing as? Trigger.Sun, onDismiss, onSave)
+    }
+}
+
+/** Sunrise/sunset trigger — place picked on the map, plus a ± minutes offset. */
+@Composable
+private fun SunConfig(existing: Trigger.Sun?, onDismiss: () -> Unit, onSave: (Trigger) -> Unit) {
+    var sunrise by remember { mutableStateOf(existing?.sunrise ?: false) }
+    var offset by remember { mutableIntStateOf(existing?.offsetMin ?: 0) }
+    var place by remember { mutableStateOf(existing?.place ?: "") }
+    var lat by remember { mutableDoubleStateOf(existing?.lat ?: 0.0) }
+    var lng by remember { mutableDoubleStateOf(existing?.lng ?: 0.0) }
+    var showMap by remember { mutableStateOf(false) }
+
+    if (showMap) {
+        Dialog(onDismissRequest = { showMap = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Surface(Modifier.fillMaxSize()) {
+                PlacePicker(
+                    initial = if (place.isNotBlank())
+                        Trigger.Location(true, lat, lng, 200f, place) else null,
+                    onBack = { showMap = false },
+                    onDone = { p, la, ln, _ -> place = p; lat = la; lng = ln; showMap = false },
+                )
+            }
+        }
+        return
+    }
+
+    ConfigDialog("Sunrise / sunset", canSave = place.isNotBlank(), onDismiss = onDismiss,
+        onSave = { onSave(Trigger.Sun(sunrise, offset, lat, lng, place)) }) {
+        OnOff("Follow the", sunrise, { sunrise = it }, "Sunrise", "Sunset")
+        Column {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Offset", fontSize = 14.sp)
+                Text(
+                    when {
+                        offset == 0 -> "exactly"
+                        offset > 0 -> "$offset min after"
+                        else -> "${-offset} min before"
+                    },
+                    fontWeight = FontWeight.SemiBold)
+            }
+            Slider(value = offset.toFloat(), onValueChange = { offset = it.toInt() },
+                valueRange = -60f..60f, steps = 23)
+        }
+        FilledTonalButton(onClick = { showMap = true }, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Filled.Map, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(if (place.isBlank()) "Pick where you are on the map" else "Change place")
+        }
+        if (place.isNotBlank()) Text(place, fontSize = 13.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Sun times are computed offline from the location — no internet needed.",
+            fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -615,6 +689,46 @@ private fun ActionConfig(kind: ActionKind, existing: Action?, onDismiss: () -> U
                 InputField("Message", text) { text = it }
             }
         }
+        ActionKind.WEBSITE -> {
+            var url by remember { mutableStateOf((existing as? Action.OpenUrl)?.url ?: "") }
+            ConfigDialog("Open a website", canSave = url.isNotBlank(), onDismiss = onDismiss,
+                onSave = { onSave(Action.OpenUrl(url.trim())) }) {
+                InputField("Address", url) { url = it }
+                Text("e.g. wikipedia.org — https:// is added for you",
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        ActionKind.MEDIA -> {
+            var key by remember { mutableStateOf((existing as? Action.Media)?.key ?: MediaKey.PLAY_PAUSE) }
+            ConfigDialog("Media control", onDismiss = onDismiss, onSave = { onSave(Action.Media(key)) }) {
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    MediaKey.entries.forEachIndexed { i, k ->
+                        SegmentedButton(selected = key == k, onClick = { key = k },
+                            shape = SegmentedButtonDefaults.itemShape(i, MediaKey.entries.size)) {
+                            Text(when (k) {
+                                MediaKey.PLAY_PAUSE -> "Play/Pause"
+                                MediaKey.NEXT -> "Next"
+                                MediaKey.PREVIOUS -> "Previous"
+                            }, fontSize = 12.sp, maxLines = 1)
+                        }
+                    }
+                }
+            }
+        }
+        ActionKind.WAIT -> {
+            var secs by remember { mutableIntStateOf((existing as? Action.Wait)?.seconds ?: 3) }
+            ConfigDialog("Wait between actions", onDismiss = onDismiss,
+                onSave = { onSave(Action.Wait(secs)) }) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Pause for", fontSize = 14.sp)
+                    Text("$secs s", fontWeight = FontWeight.SemiBold)
+                }
+                Slider(value = secs.toFloat(), onValueChange = { secs = it.toInt().coerceIn(1, 30) },
+                    valueRange = 1f..30f, steps = 28)
+                Text("Actions after this one run once the pause finishes.",
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
     }
 }
 
@@ -699,6 +813,7 @@ private fun IconPickerDialog(onPick: (String) -> Unit, onDismiss: () -> Unit) {
 
 private fun kindOf(t: Trigger): TriggerKind = when (t) {
     is Trigger.TimeOfDay -> TriggerKind.TIME
+    is Trigger.Sun -> TriggerKind.SUN
     is Trigger.Battery -> TriggerKind.BATTERY
     is Trigger.Power -> TriggerKind.POWER
     is Trigger.Headset -> TriggerKind.HEADSET
@@ -721,8 +836,11 @@ private fun kindOf(a: Action): ActionKind = when (a) {
     is Action.BluetoothToggle -> ActionKind.BLUETOOTH
     is Action.AirplaneToggle -> ActionKind.AIRPLANE
     is Action.LaunchApp -> ActionKind.APP
+    is Action.OpenUrl -> ActionKind.WEBSITE
+    is Action.Media -> ActionKind.MEDIA
     is Action.Flashlight -> ActionKind.FLASH
     is Action.Notify -> ActionKind.NOTIFY
+    is Action.Wait -> ActionKind.WAIT
 }
 
 private fun kindOfCond(c: Condition): ConditionKind = when (c) {

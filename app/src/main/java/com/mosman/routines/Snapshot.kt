@@ -57,7 +57,8 @@ object Snapshot {
                     ctx.getSystemService(BluetoothManager::class.java)?.adapter?.isEnabled == true)
                 is Action.AirplaneToggle -> Action.AirplaneToggle(State.airplane(ctx))
                 // Nothing sensible to undo for these:
-                is Action.LaunchApp, is Action.Flashlight, is Action.Notify -> null
+                is Action.LaunchApp, is Action.Flashlight, is Action.Notify,
+                is Action.Media, is Action.OpenUrl, is Action.Wait -> null
             }
         }.getOrNull()
     }

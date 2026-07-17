@@ -110,6 +110,23 @@ sealed class Trigger {
         override fun toJson() = JSONObject().put("t", "air").put("on", on)
     }
 
+    /** Sunrise or sunset at a chosen place, with an optional offset in minutes. */
+    data class Sun(val sunrise: Boolean, val offsetMin: Int,
+                   val lat: Double, val lng: Double, val place: String) : Trigger() {
+        override fun icon() = if (sunrise) "sunny" else "bedtime"
+        override fun describe(): String {
+            val event = if (sunrise) "sunrise" else "sunset"
+            val off = when {
+                offsetMin == 0 -> ""
+                offsetMin > 0 -> " +${offsetMin}m"
+                else -> " ${offsetMin}m"
+            }
+            return "At $event$off ($place)"
+        }
+        override fun toJson() = JSONObject().put("t", "sun").put("rise", sunrise)
+            .put("off", offsetMin).put("lat", lat).put("lng", lng).put("place", place)
+    }
+
     companion object {
         fun fromJson(o: JSONObject): Trigger = when (o.getString("t")) {
             "time" -> TimeOfDay(o.getInt("h"), o.getInt("m"), o.getJSONArray("days").toIntSet())
@@ -122,6 +139,8 @@ sealed class Trigger {
                 o.getDouble("radius").toFloat(), o.getString("place"))
             "screen" -> Screen(o.getBoolean("on"))
             "air" -> Airplane(o.getBoolean("on"))
+            "sun" -> Sun(o.getBoolean("rise"), o.optInt("off", 0),
+                o.getDouble("lat"), o.getDouble("lng"), o.optString("place", "here"))
             else -> Screen(true)
         }
     }
@@ -255,6 +274,24 @@ sealed class Action {
         override fun access() = Access.NONE
         override fun toJson() = JSONObject().put("a", "notify").put("title", title).put("text", text)
     }
+    data class Media(val key: MediaKey) : Action() {
+        override fun icon() = "music"
+        override fun describe() = key.label()
+        override fun access() = Access.NONE
+        override fun toJson() = JSONObject().put("a", "media").put("key", key.name)
+    }
+    data class OpenUrl(val url: String) : Action() {
+        override fun icon() = "app"
+        override fun describe() = "Open $url"
+        override fun access() = Access.NONE
+        override fun toJson() = JSONObject().put("a", "url").put("url", url)
+    }
+    data class Wait(val seconds: Int) : Action() {
+        override fun icon() = "schedule"
+        override fun describe() = "Wait $seconds s"
+        override fun access() = Access.NONE
+        override fun toJson() = JSONObject().put("a", "wait").put("s", seconds)
+    }
 
     companion object {
         fun fromJson(o: JSONObject): Action = when (o.getString("a")) {
@@ -271,8 +308,18 @@ sealed class Action {
             "app" -> LaunchApp(o.getString("pkg"), o.getString("label"))
             "flash" -> Flashlight(o.getBoolean("on"))
             "notify" -> Notify(o.getString("title"), o.optString("text"))
+            "media" -> Media(runCatching { MediaKey.valueOf(o.getString("key")) }
+                .getOrDefault(MediaKey.PLAY_PAUSE))
+            "url" -> OpenUrl(o.getString("url"))
+            "wait" -> Wait(o.optInt("s", 3).coerceIn(1, 30))
             else -> Notify("Routine", "")
         }
+    }
+}
+
+enum class MediaKey { PLAY_PAUSE, NEXT, PREVIOUS;
+    fun label() = when (this) {
+        PLAY_PAUSE -> "Play / pause media"; NEXT -> "Next track"; PREVIOUS -> "Previous track"
     }
 }
 
@@ -285,6 +332,7 @@ data class Routine(
     val name: String,
     val icon: String = "star",
     val enabled: Boolean = true,
+    val notifyOnRun: Boolean = true,
     val match: Match = Match.ANY,
     val triggers: List<Trigger> = emptyList(),
     val conditions: List<Condition> = emptyList(),
@@ -310,8 +358,19 @@ data class Routine(
         return "$when_ → ${endMode.describe()}"
     }
 
+    /** Soonest upcoming run among this routine's schedulable triggers, if any. */
+    fun nextRun(from: java.time.ZonedDateTime = java.time.ZonedDateTime.now()): java.time.ZonedDateTime? =
+        triggers.mapNotNull { t ->
+            when (t) {
+                is Trigger.TimeOfDay -> nextTimeTrigger(t, from)
+                is Trigger.Sun -> SunCalc.next(t, from)
+                else -> null
+            }
+        }.minOrNull()
+
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id); put("name", name); put("icon", icon); put("enabled", enabled)
+        put("notify", notifyOnRun)
         put("match", match.name)
         put("triggers", JSONArray().apply { triggers.forEach { put(it.toJson()) } })
         put("conditions", JSONArray().apply { conditions.forEach { put(it.toJson()) } })
@@ -327,6 +386,7 @@ data class Routine(
             name = o.optString("name", "Routine"),
             icon = o.optString("icon", "star"),
             enabled = o.optBoolean("enabled", true),
+            notifyOnRun = o.optBoolean("notify", true),
             match = runCatching { Match.valueOf(o.optString("match")) }.getOrDefault(Match.ANY),
             triggers = o.optJSONArray("triggers").items { Trigger.fromJson(it) },
             conditions = o.optJSONArray("conditions").items { Condition.fromJson(it) },

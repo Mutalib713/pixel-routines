@@ -26,9 +26,15 @@ object Scheduler {
     }
 
     fun scheduleTime(ctx: Context, r: Routine, index: Int, t: Trigger.TimeOfDay) {
+        nextTimeTrigger(t)?.let { setAlarm(ctx, r, index, it.toInstant().toEpochMilli()) }
+    }
+
+    fun scheduleSun(ctx: Context, r: Routine, index: Int, t: Trigger.Sun) {
+        SunCalc.next(t)?.let { setAlarm(ctx, r, index, it.toInstant().toEpochMilli()) }
+    }
+
+    private fun setAlarm(ctx: Context, r: Routine, index: Int, at: Long) {
         val am = ctx.getSystemService(AlarmManager::class.java)
-        val next = nextTimeTrigger(t) ?: return
-        val at = next.toInstant().toEpochMilli()
         val p = pi(ctx, r.id, index)
         if (am.canScheduleExactAlarms())
             am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, p)

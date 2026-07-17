@@ -106,6 +106,27 @@ object Actions {
                     notify(ctx, a.title, a.text)
                     "Notified"
                 }
+                is Action.Media -> {
+                    val code = when (a.key) {
+                        MediaKey.PLAY_PAUSE -> android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
+                        MediaKey.NEXT -> android.view.KeyEvent.KEYCODE_MEDIA_NEXT
+                        MediaKey.PREVIOUS -> android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS
+                    }
+                    am.dispatchMediaKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, code))
+                    am.dispatchMediaKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, code))
+                    a.key.label()
+                }
+                is Action.OpenUrl -> {
+                    val url = if (a.url.startsWith("http")) a.url else "https://" + a.url
+                    val i = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    ctx.startActivity(i)
+                    "Opened $url"
+                }
+                is Action.Wait -> {
+                    Thread.sleep(a.seconds.coerceIn(1, 30) * 1000L)
+                    "Waited ${a.seconds}s"
+                }
             }
         }.getOrElse { "${a.describe()} — failed" }
     }

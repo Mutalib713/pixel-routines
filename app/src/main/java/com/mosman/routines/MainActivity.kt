@@ -27,6 +27,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
@@ -48,6 +49,7 @@ sealed interface Screen {
     data object Home : Screen
     data object Discover : Screen
     data object Settings : Screen
+    data object History : Screen
     data class Edit(val routine: Routine) : Screen
 }
 
@@ -81,10 +83,10 @@ private fun AppRoot(tick: Int, refresh: () -> Unit) {
             onRefreshPerms = refresh,
             onOpenDiscover = { screen = Screen.Discover },
             onOpenSettings = { screen = Screen.Settings },
+            onOpenHistory = { screen = Screen.History },
             onNew = { screen = Screen.Edit(Routine.new()) },
             onOpen = { screen = Screen.Edit(it) },
             onToggle = { r, on -> Store.setEnabled(ctx, r.id, on); reload() },
-            onRunNow = { r -> Engine.runNow(ctx, r) },
         )
         is Screen.Discover -> DiscoverScreen(
             onBack = { screen = Screen.Home },
@@ -92,6 +94,7 @@ private fun AppRoot(tick: Int, refresh: () -> Unit) {
             onScratch = { screen = Screen.Edit(Routine.new()) },
         )
         is Screen.Settings -> SettingsScreen(tick, onBack = { screen = Screen.Home })
+        is Screen.History -> HistoryScreen(onBack = { screen = Screen.Home })
         is Screen.Edit -> EditorScreen(
             initial = s.routine,
             onSave = { r -> Store.upsert(ctx, r); reload(); screen = Screen.Home },
@@ -108,15 +111,16 @@ private fun HomeScreen(
     onRefreshPerms: () -> Unit,
     onOpenDiscover: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenHistory: () -> Unit,
     onNew: () -> Unit,
     onOpen: (Routine) -> Unit,
     onToggle: (Routine, Boolean) -> Unit,
-    onRunNow: (Routine) -> List<String>,
 ) {
     val ctx = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val activeIds = remember(tick, routines) { Store.activeIds(ctx) }
+    var paused by remember(tick) { mutableStateOf(Store.isPaused(ctx)) }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
@@ -124,6 +128,7 @@ private fun HomeScreen(
             LargeTopAppBar(
                 title = { Text("Pixel Routines", fontWeight = FontWeight.Bold) },
                 actions = {
+                    IconButton(onClick = onOpenHistory) { Icon(Icons.Filled.History, "History") }
                     IconButton(onClick = onOpenDiscover) { Icon(Icons.Filled.Lightbulb, "Ideas") }
                     IconButton(onClick = onOpenSettings) { Icon(Icons.Filled.Settings, "Settings") }
                 },
@@ -142,6 +147,21 @@ private fun HomeScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            if (paused) item {
+                Card(shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                    Row(Modifier.padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text("All routines are paused", fontWeight = FontWeight.SemiBold,
+                            fontSize = 14.sp, modifier = Modifier.weight(1f),
+                            color = MaterialTheme.colorScheme.onErrorContainer)
+                        TextButton(onClick = { Store.setPaused(ctx, false); paused = false }) {
+                            Text("Resume", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
             item { PermissionArea(routines, tick, onRefreshPerms) }
             if (routines.isEmpty()) item { EmptyState(onOpenDiscover) }
             items(routines, key = { it.id }) { r ->
@@ -150,9 +170,12 @@ private fun HomeScreen(
                     onClick = { onOpen(r) },
                     onToggle = { onToggle(r, it) },
                     onRunNow = {
-                        val res = onRunNow(r)
-                        scope.launch {
-                            snackbar.showSnackbar(if (res.isEmpty()) "No actions" else res.joinToString(" · "))
+                        scope.launch { snackbar.showSnackbar("Running “${r.name}”…") }
+                        Engine.runNow(ctx, r) { res ->
+                            scope.launch {
+                                snackbar.showSnackbar(
+                                    if (res.isEmpty()) "No actions" else res.joinToString(" · "))
+                            }
                         }
                     })
             }
@@ -200,6 +223,23 @@ private fun RoutineCard(
             r.endSummary()?.let {
                 Spacer(Modifier.height(6.dp))
                 SummaryLine("UNTIL", it, MaterialTheme.colorScheme.secondary)
+            }
+            if (r.enabled) {
+                r.nextRun()?.let { next ->
+                    val d = java.time.Duration.between(java.time.ZonedDateTime.now(), next)
+                    val rel = when {
+                        d.toDays() > 0 -> "${d.toDays()}d ${d.toHours() % 24}h"
+                        d.toHours() > 0 -> "${d.toHours()}h ${d.toMinutes() % 60}m"
+                        else -> "${maxOf(d.toMinutes(), 1)}m"
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Next: " + next.dayOfWeek.getDisplayName(
+                            java.time.format.TextStyle.SHORT, java.util.Locale.getDefault()) +
+                            " " + "%02d:%02d".format(next.hour, next.minute) + " · in " + rel,
+                        fontSize = 12.sp, color = MaterialTheme.colorScheme.primary,
+                    )
+                }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 TextButton(onClick = onRunNow) {
@@ -362,6 +402,34 @@ private fun SettingsScreen(tick: Int, onBack: () -> Unit) {
     val shizukuReady = remember(tick) { ShizukuBridge.ready }
     val secureGranted = remember(tick) { Permissions.hasSecureSettings(ctx) }
     val adbCmd = "adb shell pm grant ${ctx.packageName} android.permission.WRITE_SECURE_SETTINGS"
+    var paused by remember(tick) { mutableStateOf(Store.isPaused(ctx)) }
+
+    val exporter = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) {
+            runCatching {
+                ctx.contentResolver.openOutputStream(uri)?.use {
+                    it.write(Store.exportJson(ctx).toByteArray())
+                }
+            }
+            scope.launch { snackbar.showSnackbar("Routines exported") }
+        }
+    }
+    val importer = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val added = runCatching {
+                ctx.contentResolver.openInputStream(uri)?.use {
+                    Store.importJson(ctx, it.readBytes().decodeToString())
+                } ?: 0
+            }.getOrDefault(0)
+            scope.launch {
+                snackbar.showSnackbar(
+                    if (added > 0) "Imported $added routine${if (added == 1) "" else "s"}"
+                    else "Nothing to import in that file")
+            }
+        }
+    }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
@@ -373,6 +441,41 @@ private fun SettingsScreen(tick: Int, onBack: () -> Unit) {
         LazyColumn(Modifier.fillMaxSize().padding(pad),
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
+
+            item {
+                Card(shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
+                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Pause all routines", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                            Text("Nothing fires until you resume. Also available as a Quick Settings tile.",
+                                fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(checked = paused, onCheckedChange = {
+                            paused = it; Store.setPaused(ctx, it)
+                        })
+                    }
+                }
+            }
+
+            item {
+                Card(shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Share routines", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Spacer(Modifier.height(6.dp))
+                        Text("Export your routines to a file and send it to friends — they import it here.",
+                            fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(10.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilledTonalButton(onClick = {
+                                exporter.launch("pixel-routines.json")
+                            }) { Text("Export") }
+                            FilledTonalButton(onClick = {
+                                importer.launch(arrayOf("application/json", "text/plain", "*/*"))
+                            }) { Text("Import") }
+                        }
+                    }
+                }
+            }
 
             item {
                 SettingCard(

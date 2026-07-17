@@ -40,6 +40,7 @@ object Engine {
     private fun armOne(ctx: Context, r: Routine, index: Int, t: Trigger) {
         when (t) {
             is Trigger.TimeOfDay -> Scheduler.scheduleTime(ctx, r, index, t)
+            is Trigger.Sun -> Scheduler.scheduleSun(ctx, r, index, t)
             is Trigger.Location -> Geofences.add(ctx, r, index, t)
             else -> Unit // event triggers are handled by EventService
         }
@@ -52,28 +53,26 @@ object Engine {
 
     // ---- Firing paths --------------------------------------------------------
 
-    fun onTimeFired(ctx: Context, id: Long, index: Int) {
-        val r = Store.get(ctx, id) ?: return
-        if (!r.enabled) return
-        if (index >= END_OFFSET) {
-            endRoutine(ctx, r)
-            (r.endTriggers.getOrNull(index - END_OFFSET) as? Trigger.TimeOfDay)
-                ?.let { Scheduler.scheduleTime(ctx, r, index, it) }
-        } else {
-            fireRoutine(ctx, r)
-            (r.triggers.getOrNull(index) as? Trigger.TimeOfDay)
-                ?.let { Scheduler.scheduleTime(ctx, r, index, it) }
+    fun onTimeFired(ctx: Context, id: Long, index: Int, onComplete: (() -> Unit)? = null) {
+        val r = Store.get(ctx, id)
+        if (r == null || !r.enabled) { onComplete?.invoke(); return }
+        val isEnd = index >= END_OFFSET
+        if (isEnd) endRoutine(ctx, r, onComplete) else fireRoutine(ctx, r, onComplete)
+        // Re-arm this recurring trigger for its next occurrence.
+        val list = if (isEnd) r.endTriggers else r.triggers
+        when (val t = list.getOrNull(if (isEnd) index - END_OFFSET else index)) {
+            is Trigger.TimeOfDay -> Scheduler.scheduleTime(ctx, r, index, t)
+            is Trigger.Sun -> Scheduler.scheduleSun(ctx, r, index, t)
+            else -> Unit
         }
     }
 
-    fun onGeofence(ctx: Context, id: Long, index: Int, enter: Boolean) {
-        val r = Store.get(ctx, id) ?: return
-        if (!r.enabled) return
-        val list = if (index >= END_OFFSET) r.endTriggers else r.triggers
-        val t = list.getOrNull(if (index >= END_OFFSET) index - END_OFFSET else index) as? Trigger.Location
-            ?: return
-        if (t.enter != enter) return
-        if (index >= END_OFFSET) endRoutine(ctx, r) else fireRoutine(ctx, r)
+    fun onGeofence(ctx: Context, id: Long, index: Int, enter: Boolean, onComplete: (() -> Unit)? = null) {
+        val r = Store.get(ctx, id)
+        val list = if (index >= END_OFFSET) r?.endTriggers else r?.triggers
+        val t = list?.getOrNull(if (index >= END_OFFSET) index - END_OFFSET else index) as? Trigger.Location
+        if (r == null || !r.enabled || t == null || t.enter != enter) { onComplete?.invoke(); return }
+        if (index >= END_OFFSET) endRoutine(ctx, r, onComplete) else fireRoutine(ctx, r, onComplete)
     }
 
     /** Live device events from EventService. */
@@ -86,41 +85,56 @@ object Engine {
         }
     }
 
-    /** Runs a routine if its conditions and match rule pass right now. */
-    fun fireRoutine(ctx: Context, r: Routine) {
-        if (!conditionsMet(ctx, r)) return
-        if (r.match == Match.ALL && !allStateTriggersTrue(ctx, r)) return
-
-        // Remember the "before" state so the end condition can put it back.
-        if (r.hasEnd && r.endMode == EndMode.REVERT)
-            Snapshot.save(ctx, r.id, Snapshot.capture(ctx, r))
-
-        val results = Actions.runAll(ctx, r)
-        if (r.hasEnd) Store.setActive(ctx, r.id, true)
-        Actions.notifyRan(ctx, r, results)
-        RoutinesWidget.refresh(ctx)
+    /** Runs a routine if its conditions and match rule pass right now (async: Wait actions sleep). */
+    fun fireRoutine(ctx: Context, r: Routine, onComplete: (() -> Unit)? = null) {
+        if (Store.isPaused(ctx) || !conditionsMet(ctx, r) ||
+            (r.match == Match.ALL && !allStateTriggersTrue(ctx, r))) {
+            onComplete?.invoke(); return
+        }
+        val app = ctx.applicationContext
+        Thread {
+            // Remember the "before" state so the end condition can put it back.
+            if (r.hasEnd && r.endMode == EndMode.REVERT)
+                Snapshot.save(app, r.id, Snapshot.capture(app, r))
+            val results = Actions.runAll(app, r)
+            if (r.hasEnd) Store.setActive(app, r.id, true)
+            RunLog.add(app, r, "ran", results)
+            if (r.notifyOnRun) Actions.notifyRan(app, r, results)
+            RoutinesWidget.refresh(app)
+            onComplete?.invoke()
+        }.start()
     }
 
     /** Ends a running routine: undo, run end actions, or leave things alone. */
-    fun endRoutine(ctx: Context, r: Routine) {
-        val results = when (r.endMode) {
-            EndMode.REVERT -> Snapshot.load(ctx, r.id).map { Actions.runOne(ctx, it) }
-            EndMode.CUSTOM -> r.endActions.map { Actions.runOne(ctx, it) }
-            EndMode.NOTHING -> emptyList()
-        }
-        Snapshot.clear(ctx, r.id)
-        Store.setActive(ctx, r.id, false)
-        if (results.isNotEmpty()) Actions.notifyEnded(ctx, r, results)
-        RoutinesWidget.refresh(ctx)
+    fun endRoutine(ctx: Context, r: Routine, onComplete: (() -> Unit)? = null) {
+        val app = ctx.applicationContext
+        Thread {
+            val results = when (r.endMode) {
+                EndMode.REVERT -> Snapshot.load(app, r.id).map { Actions.runOne(app, it) }
+                EndMode.CUSTOM -> r.endActions.map { Actions.runOne(app, it) }
+                EndMode.NOTHING -> emptyList()
+            }
+            Snapshot.clear(app, r.id)
+            Store.setActive(app, r.id, false)
+            RunLog.add(app, r, "ended", results.ifEmpty { listOf("left as is") })
+            if (results.isNotEmpty() && r.notifyOnRun) Actions.notifyEnded(app, r, results)
+            RoutinesWidget.refresh(app)
+            onComplete?.invoke()
+        }.start()
     }
 
-    /** Manual "Run now" — skips trigger/condition checks. */
-    fun runNow(ctx: Context, r: Routine): List<String> {
-        if (r.hasEnd && r.endMode == EndMode.REVERT)
-            Snapshot.save(ctx, r.id, Snapshot.capture(ctx, r))
-        val out = Actions.runAll(ctx, r)
-        if (r.hasEnd) { Store.setActive(ctx, r.id, true); RoutinesWidget.refresh(ctx) }
-        return out
+    /** Manual "Run now" — skips trigger/condition/pause checks; callback lands on the caller's thread pool. */
+    fun runNow(ctx: Context, r: Routine, onDone: (List<String>) -> Unit) {
+        val app = ctx.applicationContext
+        Thread {
+            if (r.hasEnd && r.endMode == EndMode.REVERT)
+                Snapshot.save(app, r.id, Snapshot.capture(app, r))
+            val out = Actions.runAll(app, r)
+            if (r.hasEnd) Store.setActive(app, r.id, true)
+            RunLog.add(app, r, "ran (manual)", out)
+            RoutinesWidget.refresh(app)
+            onDone(out)
+        }.start()
     }
 
     // ---- Condition + state evaluation ---------------------------------------
@@ -142,7 +156,7 @@ object Engine {
         r.triggers.all { State.isTrue(ctx, it) != false }
 
     private fun isEventTrigger(t: Trigger): Boolean = when (t) {
-        is Trigger.TimeOfDay, is Trigger.Location -> false
+        is Trigger.TimeOfDay, is Trigger.Sun, is Trigger.Location -> false // alarm/geofence-based
         else -> true
     }
 

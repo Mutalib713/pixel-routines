@@ -68,6 +68,37 @@ object Store {
     fun onboarded(ctx: Context) = appPrefs(ctx).getBoolean(KEY_ONBOARDED, false)
     fun setOnboarded(ctx: Context) = appPrefs(ctx).edit().putBoolean(KEY_ONBOARDED, true).apply()
 
+    // ---- Pause everything (Quick Settings tile / home banner) ----
+
+    fun isPaused(ctx: Context) = appPrefs(ctx).getBoolean("paused", false)
+    fun setPaused(ctx: Context, paused: Boolean) {
+        appPrefs(ctx).edit().putBoolean("paused", paused).apply()
+        RoutinesWidget.refresh(ctx)
+    }
+
+    // ---- Export / import (share your routines with friends) ----
+
+    fun exportJson(ctx: Context): String {
+        val arr = JSONArray()
+        load(ctx).forEach { arr.put(it.toJson()) }
+        return arr.toString(2)
+    }
+
+    /** Merges imported routines under fresh ids. Returns how many were added. */
+    fun importJson(ctx: Context, json: String): Int {
+        val incoming = runCatching {
+            val arr = JSONArray(json)
+            (0 until arr.length()).map { Routine.fromJson(arr.getJSONObject(it)) }
+        }.getOrDefault(emptyList())
+        if (incoming.isEmpty()) return 0
+        var nextId = System.currentTimeMillis()
+        val fresh = incoming.map { it.copy(id = nextId++) }
+        save(ctx, load(ctx) + fresh)
+        Engine.rearmAll(ctx)
+        RoutinesWidget.refresh(ctx)
+        return fresh.size
+    }
+
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE)
     private fun activePrefs(ctx: Context) = ctx.getSharedPreferences(PREF_ACTIVE, Context.MODE_PRIVATE)
     private fun appPrefs(ctx: Context) = ctx.getSharedPreferences(PREF_APP, Context.MODE_PRIVATE)
