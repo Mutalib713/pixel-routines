@@ -2,6 +2,8 @@
 
 package com.mosman.routines
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -15,9 +17,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AddToHomeScreen
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -41,6 +45,12 @@ fun BackIcon() = Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = 
 private enum class TriggerKind(val icon: String, val label: String, val sub: String) {
     TIME("schedule", "Time of day", "At a set time on chosen days"),
     SUN("sunny", "Sunrise / sunset", "Follows the sun, with an offset"),
+    NOTIFICATION("notify", "A notification arrives", "From an app, optionally matching text"),
+    CALENDAR("calendar", "Calendar event", "When an event starts or ends"),
+    MOTION("car", "Driving / walking", "When you start or stop moving"),
+    GESTURE("screen", "Flip or shake", "Face-down to silence, shake to run"),
+    APP_OPEN("app", "You open an app", "When an app comes to the front"),
+    NFC("nfc", "NFC tag", "Tap a sticker to run this"),
     BATTERY("battery", "Battery level", "Drops below / rises above a %"),
     POWER("power", "Charging", "Charger connected or unplugged"),
     HEADSET("headphones", "Headphones", "Wired headset plugged/unplugged"),
@@ -64,6 +74,11 @@ private enum class ActionKind(val icon: String, val label: String, val access: A
     AIRPLANE("flight", "Airplane on/off", Access.SHIZUKU),
     APP("app", "Open an app", Access.NONE),
     WEBSITE("app", "Open a website", Access.NONE),
+    MESSAGE("chat", "Message someone", Access.NONE),
+    CALL("call", "Call someone", Access.CALL),
+    SMS("chat", "Send a text", Access.SMS),
+    REPLY("reply", "Reply to a message", Access.NOTIF_ACCESS),
+    SPEAK("speak", "Say something out loud", Access.NONE),
     MEDIA("music", "Media control", Access.NONE),
     FLASH("flash", "Flashlight", Access.NONE),
     NOTIFY("notify", "Show a reminder", Access.NONE),
@@ -228,6 +243,19 @@ fun EditorScreen(
                     }
                     AddButton("Add end action") { actionSheetFor = true }
                 }
+            }
+
+            // One-tap shortcut on the home screen
+            if (existing) OutlinedButton(
+                onClick = {
+                    if (RunActivity.pinShortcut(ctx, result()))
+                        android.widget.Toast.makeText(ctx, "Check your home screen",
+                            android.widget.Toast.LENGTH_SHORT).show()
+                },
+                modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp)) {
+                Icon(Icons.Filled.AddToHomeScreen, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Add a shortcut to the home screen")
             }
 
             // Notify toggle
@@ -424,6 +452,29 @@ private fun PercentSlider(label: String, value: Int, onChange: (Int) -> Unit) {
     }
 }
 
+/** Pick a person from the system contact picker, or just type a number. */
+@Composable
+private fun ContactField(who: String, number: String,
+                         onWho: (String) -> Unit, onNumber: (String) -> Unit) {
+    val ctx = LocalContext.current
+    val picker = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()) { result ->
+        result.data?.data?.let { uri ->
+            Contacts.read(ctx, uri)?.let { c -> onWho(c.name); onNumber(c.number) }
+        }
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilledTonalButton(onClick = { picker.launch(Contacts.pickIntent()) },
+            modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Filled.Person, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(if (who.isBlank()) "Choose a contact" else "Change contact")
+        }
+        if (who.isNotBlank()) Text(who, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+        InputField("Phone number", number, number = true) { onNumber(it) }
+    }
+}
+
 @Composable
 private fun InputField(label: String, value: String, number: Boolean = false, onChange: (String) -> Unit) {
     OutlinedTextField(value = value, onValueChange = onChange, label = { Text(label) }, singleLine = true,
@@ -494,6 +545,156 @@ private fun TriggerConfig(kind: TriggerKind, existing: Trigger?, onDismiss: () -
         }
         TriggerKind.LOCATION -> LocationConfig(existing as? Trigger.Location, onDismiss, onSave)
         TriggerKind.SUN -> SunConfig(existing as? Trigger.Sun, onDismiss, onSave)
+        TriggerKind.NOTIFICATION -> {
+            val ctx = LocalContext.current
+            val t = existing as? Trigger.NotificationFrom
+            val apps = remember { Apps.installed(ctx) }
+            var pkg by remember { mutableStateOf(t?.pkg ?: "") }
+            var label by remember { mutableStateOf(t?.label ?: "") }
+            var contains by remember { mutableStateOf(t?.contains ?: "") }
+            var query by remember { mutableStateOf("") }
+            ConfigDialog("Notification arrives", canSave = pkg.isNotBlank(), onDismiss = onDismiss,
+                onSave = { onSave(Trigger.NotificationFrom(pkg, label, contains.trim())) }) {
+                if (pkg.isNotBlank()) Text("From: $label", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                InputField("Search apps", query) { query = it }
+                LazyColumn(Modifier.heightIn(max = 200.dp)) {
+                    items(apps.filter { it.label.contains(query, true) }) { app ->
+                        Row(Modifier.fillMaxWidth()
+                            .clickable { pkg = app.pkg; label = app.label }
+                            .padding(vertical = 10.dp)) {
+                            Text(app.label, fontSize = 15.sp,
+                                color = if (app.pkg == pkg) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurface)
+                        }
+                    }
+                }
+                InputField("Only if it contains (optional)", contains) { contains = it }
+                Text("Needs notification access — the app will ask.",
+                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        TriggerKind.CALENDAR -> {
+            val ctx = LocalContext.current
+            val t = existing as? Trigger.CalendarEvent
+            var title by remember { mutableStateOf(t?.titleContains ?: "") }
+            var atStart by remember { mutableStateOf(t?.atStart ?: true) }
+            val titles = remember { Calendars.upcomingTitles(ctx) }
+            ConfigDialog("Calendar event", onDismiss = onDismiss,
+                onSave = { onSave(Trigger.CalendarEvent(title.trim(), atStart)) }) {
+                OnOff("Trigger when the event", atStart, { atStart = it }, "Starts", "Ends")
+                InputField("Event name contains (blank = any)", title) { title = it }
+                if (titles.isNotEmpty()) {
+                    Text("From your calendar:", fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        titles.take(6).forEach { s ->
+                            SuggestionChip(onClick = { title = s },
+                                label = { Text(s, maxLines = 1, fontSize = 12.sp) })
+                        }
+                    }
+                }
+            }
+        }
+        TriggerKind.MOTION -> {
+            val t = existing as? Trigger.Motion
+            var type by remember { mutableStateOf(t?.type ?: MotionType.VEHICLE) }
+            var entering by remember { mutableStateOf(t?.entering ?: true) }
+            ConfigDialog("Driving / walking", onDismiss = onDismiss,
+                onSave = { onSave(Trigger.Motion(type, entering)) }) {
+                OnOff("Trigger when you", entering, { entering = it }, "Start", "Stop")
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    MotionType.entries.forEach { m ->
+                        FilterChip(selected = type == m, onClick = { type = m },
+                            label = { Text(m.label()) })
+                    }
+                }
+                Text("Your phone works this out from movement — no extra hardware needed.",
+                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        TriggerKind.GESTURE -> {
+            var type by remember { mutableStateOf((existing as? Trigger.Gesture)?.type ?: GestureType.FLIP_DOWN) }
+            ConfigDialog("Flip or shake", onDismiss = onDismiss,
+                onSave = { onSave(Trigger.Gesture(type)) }) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    GestureType.entries.forEach { g ->
+                        FilterChip(selected = type == g, onClick = { type = g },
+                            label = { Text(g.label()) }, modifier = Modifier.fillMaxWidth())
+                    }
+                }
+                Text("Keeps the motion sensor awake while enabled — costs a little battery.",
+                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        TriggerKind.APP_OPEN -> {
+            val ctx = LocalContext.current
+            val t = existing as? Trigger.AppOpened
+            val apps = remember { Apps.installed(ctx) }
+            var pkg by remember { mutableStateOf(t?.pkg ?: "") }
+            var label by remember { mutableStateOf(t?.label ?: "") }
+            var query by remember { mutableStateOf("") }
+            ConfigDialog("You open an app", canSave = pkg.isNotBlank(), onDismiss = onDismiss,
+                onSave = { onSave(Trigger.AppOpened(pkg, label)) }) {
+                if (pkg.isNotBlank()) Text("App: $label", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                InputField("Search apps", query) { query = it }
+                LazyColumn(Modifier.heightIn(max = 240.dp)) {
+                    items(apps.filter { it.label.contains(query, true) }) { app ->
+                        Row(Modifier.fillMaxWidth()
+                            .clickable { pkg = app.pkg; label = app.label }
+                            .padding(vertical = 10.dp)) {
+                            Text(app.label, fontSize = 15.sp,
+                                color = if (app.pkg == pkg) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurface)
+                        }
+                    }
+                }
+                Text("Needs Usage access — the app will ask.",
+                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        TriggerKind.NFC -> NfcConfig(existing as? Trigger.NfcTag, onDismiss, onSave)
+    }
+}
+
+/** Reads a real tag so you never type an id by hand. */
+@Composable
+private fun NfcConfig(existing: Trigger.NfcTag?, onDismiss: () -> Unit, onSave: (Trigger) -> Unit) {
+    val ctx = LocalContext.current
+    val activity = ctx as? android.app.Activity
+    var id by remember { mutableStateOf(existing?.id ?: "") }
+    var label by remember { mutableStateOf(existing?.label ?: "") }
+    var scanning by remember { mutableStateOf(false) }
+
+    // Reader mode captures the tag while this dialog is open.
+    DisposableEffect(scanning) {
+        val adapter = android.nfc.NfcAdapter.getDefaultAdapter(ctx)
+        if (scanning && activity != null && adapter != null) {
+            adapter.enableReaderMode(activity, { tag ->
+                id = tag.idHex(); scanning = false
+            }, android.nfc.NfcAdapter.FLAG_READER_NFC_A or
+                android.nfc.NfcAdapter.FLAG_READER_NFC_B or
+                android.nfc.NfcAdapter.FLAG_READER_NFC_F or
+                android.nfc.NfcAdapter.FLAG_READER_NFC_V or
+                android.nfc.NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK, null)
+        }
+        onDispose { if (activity != null) runCatching { adapter?.disableReaderMode(activity) } }
+    }
+
+    ConfigDialog("NFC tag", canSave = id.isNotBlank() && label.isNotBlank(), onDismiss = onDismiss,
+        onSave = { onSave(Trigger.NfcTag(id, label.trim())) }) {
+        if (!NfcActivity.available(ctx)) {
+            Text("NFC is off or unavailable. Turn it on in Settings first.",
+                fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
+        }
+        FilledTonalButton(onClick = { scanning = true }, modifier = Modifier.fillMaxWidth()) {
+            Icon(Ic.of("nfc"), null, Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(if (scanning) "Hold your tag to the phone…" else if (id.isBlank()) "Scan a tag" else "Scan a different tag")
+        }
+        if (scanning) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if (id.isNotBlank()) Text("Tag: $id", fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        InputField("Name this tag", label) { label = it }
     }
 }
 
@@ -714,6 +915,97 @@ private fun ActionConfig(kind: ActionKind, existing: Action?, onDismiss: () -> U
                 }
             }
         }
+        ActionKind.MESSAGE -> {
+            val a = existing as? Action.Message
+            var app by remember { mutableStateOf(a?.app ?: MessageApp.WHATSAPP) }
+            var who by remember { mutableStateOf(a?.who ?: "") }
+            var num by remember { mutableStateOf(a?.number ?: "") }
+            var text by remember { mutableStateOf(a?.text ?: "") }
+            ConfigDialog("Message someone", canSave = num.isNotBlank(), onDismiss = onDismiss,
+                onSave = { onSave(Action.Message(app, num.trim(), who, text)) }) {
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    MessageApp.entries.forEachIndexed { i, m ->
+                        SegmentedButton(selected = app == m, onClick = { app = m },
+                            shape = SegmentedButtonDefaults.itemShape(i, MessageApp.entries.size)) {
+                            Text(m.label(), fontSize = 13.sp, maxLines = 1)
+                        }
+                    }
+                }
+                ContactField(who, num, { who = it }, { num = it })
+                InputField("Message", text) { text = it }
+                Text(
+                    if (app == MessageApp.WHATSAPP)
+                        "Opens the chat with your message already typed — you tap send. " +
+                            "WhatsApp gives no app a way to send for you."
+                    else "Opens Messages with the text ready to send.",
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        ActionKind.CALL -> {
+            val a = existing as? Action.Call
+            var who by remember { mutableStateOf(a?.who ?: "") }
+            var num by remember { mutableStateOf(a?.number ?: "") }
+            ConfigDialog("Call someone", canSave = num.isNotBlank(), onDismiss = onDismiss,
+                onSave = { onSave(Action.Call(num.trim(), who)) }) {
+                ContactField(who, num, { who = it }, { num = it })
+                Text("This dials for real, on its own. Give it a time you're sure about.",
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
+            }
+        }
+        ActionKind.SMS -> {
+            val a = existing as? Action.SendSms
+            var who by remember { mutableStateOf(a?.who ?: "") }
+            var num by remember { mutableStateOf(a?.number ?: "") }
+            var text by remember { mutableStateOf(a?.text ?: "") }
+            ConfigDialog("Send a text", canSave = num.isNotBlank() && text.isNotBlank(),
+                onDismiss = onDismiss,
+                onSave = { onSave(Action.SendSms(num.trim(), who, text)) }) {
+                ContactField(who, num, { who = it }, { num = it })
+                InputField("Message", text) { text = it }
+                Text("Sends by itself, no tap needed. Carrier rates apply.",
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
+            }
+        }
+        ActionKind.REPLY -> {
+            val ctx = LocalContext.current
+            val a = existing as? Action.ReplyNotification
+            val apps = remember { Apps.installed(ctx) }
+            var pkg by remember { mutableStateOf(a?.pkg ?: "") }
+            var label by remember { mutableStateOf(a?.label ?: "") }
+            var text by remember { mutableStateOf(a?.text ?: "") }
+            var query by remember { mutableStateOf("") }
+            ConfigDialog("Reply to a message", canSave = text.isNotBlank(), onDismiss = onDismiss,
+                onSave = { onSave(Action.ReplyNotification(text, pkg, label)) }) {
+                InputField("Reply with", text) { text = it }
+                Text("Which app (blank = whatever messaged you last)", fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (pkg.isNotBlank()) Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(label, fontWeight = FontWeight.SemiBold, fontSize = 14.sp,
+                        modifier = Modifier.weight(1f))
+                    TextButton(onClick = { pkg = ""; label = "" }) { Text("Any app") }
+                }
+                InputField("Search apps", query) { query = it }
+                LazyColumn(Modifier.heightIn(max = 180.dp)) {
+                    items(apps.filter { it.label.contains(query, true) }) { app ->
+                        Row(Modifier.fillMaxWidth()
+                            .clickable { pkg = app.pkg; label = app.label }
+                            .padding(vertical = 10.dp)) { Text(app.label, fontSize = 15.sp) }
+                    }
+                }
+                Text("Replies through the notification itself — the one way to answer " +
+                    "WhatsApp hands-free. Pair it with a notification trigger.",
+                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        ActionKind.SPEAK -> {
+            var text by remember { mutableStateOf((existing as? Action.Speak)?.text ?: "") }
+            ConfigDialog("Say something out loud", canSave = text.isNotBlank(), onDismiss = onDismiss,
+                onSave = { onSave(Action.Speak(text)) }) {
+                InputField("Words", text) { text = it }
+                Text("Spoken through your phone's speaker.",
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
         ActionKind.WAIT -> {
             var secs by remember { mutableIntStateOf((existing as? Action.Wait)?.seconds ?: 3) }
             ConfigDialog("Wait between actions", onDismiss = onDismiss,
@@ -813,6 +1105,12 @@ private fun IconPickerDialog(onPick: (String) -> Unit, onDismiss: () -> Unit) {
 private fun kindOf(t: Trigger): TriggerKind = when (t) {
     is Trigger.TimeOfDay -> TriggerKind.TIME
     is Trigger.Sun -> TriggerKind.SUN
+    is Trigger.NotificationFrom -> TriggerKind.NOTIFICATION
+    is Trigger.CalendarEvent -> TriggerKind.CALENDAR
+    is Trigger.Motion -> TriggerKind.MOTION
+    is Trigger.Gesture -> TriggerKind.GESTURE
+    is Trigger.AppOpened -> TriggerKind.APP_OPEN
+    is Trigger.NfcTag -> TriggerKind.NFC
     is Trigger.Battery -> TriggerKind.BATTERY
     is Trigger.Power -> TriggerKind.POWER
     is Trigger.Headset -> TriggerKind.HEADSET
@@ -836,6 +1134,11 @@ private fun kindOf(a: Action): ActionKind = when (a) {
     is Action.AirplaneToggle -> ActionKind.AIRPLANE
     is Action.LaunchApp -> ActionKind.APP
     is Action.OpenUrl -> ActionKind.WEBSITE
+    is Action.Message -> ActionKind.MESSAGE
+    is Action.Call -> ActionKind.CALL
+    is Action.SendSms -> ActionKind.SMS
+    is Action.ReplyNotification -> ActionKind.REPLY
+    is Action.Speak -> ActionKind.SPEAK
     is Action.Media -> ActionKind.MEDIA
     is Action.Flashlight -> ActionKind.FLASH
     is Action.Notify -> ActionKind.NOTIFY
@@ -860,5 +1163,8 @@ private fun accessNote(a: Access): String = when (a) {
     Access.WRITE_SETTINGS -> "Needs system-settings access"
     Access.SECURE_SETTINGS -> "Needs one-time ADB grant"
     Access.SHIZUKU -> "Restricted — needs Shizuku"
+    Access.CALL -> "Dials for real — needs phone permission"
+    Access.SMS -> "Sends silently — needs SMS permission"
+    Access.NOTIF_ACCESS -> "Needs notification access"
     Access.NONE -> ""
 }

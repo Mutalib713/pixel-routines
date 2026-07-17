@@ -23,6 +23,75 @@ class EventService : Service() {
 
     private var lastBattery = -1
 
+    // --- Gestures (flip / shake) ---
+    private var sensors: android.hardware.SensorManager? = null
+    private var faceDown = false
+    private var lastShake = 0L
+    private val sensorListener = object : android.hardware.SensorEventListener {
+        override fun onAccuracyChanged(s: android.hardware.Sensor?, a: Int) {}
+        override fun onSensorChanged(e: android.hardware.SensorEvent) {
+            val (x, y, z) = Triple(e.values[0], e.values[1], e.values[2])
+
+            // Face-down / face-up: gravity on Z flips sign past a comfortable margin.
+            val nowDown = z < -8.5f
+            val nowUp = z > 8.5f
+            if (nowDown && !faceDown) {
+                faceDown = true
+                Engine.handleEvent(this@EventService) {
+                    it is Trigger.Gesture && it.type == GestureType.FLIP_DOWN
+                }
+            } else if (nowUp && faceDown) {
+                faceDown = false
+                Engine.handleEvent(this@EventService) {
+                    it is Trigger.Gesture && it.type == GestureType.FLIP_UP
+                }
+            }
+
+            // Shake: total acceleration well past gravity, debounced.
+            val g = kotlin.math.sqrt(x * x + y * y + z * z)
+            val now = System.currentTimeMillis()
+            if (g > 26f && now - lastShake > 1500) {
+                lastShake = now
+                Engine.handleEvent(this@EventService) {
+                    it is Trigger.Gesture && it.type == GestureType.SHAKE
+                }
+            }
+        }
+    }
+
+    // --- App-open watching (polls only while the screen is on) ---
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var lastForeground = ""
+    private val appPoll = object : Runnable {
+        override fun run() {
+            if (State.screenOn(this@EventService)) {
+                foregroundApp()?.let { pkg ->
+                    if (pkg != lastForeground) {
+                        lastForeground = pkg
+                        Engine.handleEvent(this@EventService) {
+                            it is Trigger.AppOpened && it.pkg == pkg
+                        }
+                    }
+                }
+            }
+            handler.postDelayed(this, 2000)
+        }
+    }
+
+    private fun foregroundApp(): String? = runCatching {
+        val usage = getSystemService(android.app.usage.UsageStatsManager::class.java)
+        val now = System.currentTimeMillis()
+        val events = usage.queryEvents(now - 10_000, now)
+        var latest: String? = null
+        val e = android.app.usage.UsageEvents.Event()
+        while (events.hasNextEvent()) {
+            events.getNextEvent(e)
+            if (e.eventType == android.app.usage.UsageEvents.Event.MOVE_TO_FOREGROUND)
+                latest = e.packageName
+        }
+        latest
+    }.getOrNull()
+
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context, intent: Intent) {
             when (intent.action) {
@@ -103,11 +172,40 @@ class EventService : Service() {
         ContextCompat.registerReceiver(this, receiver, f, ContextCompat.RECEIVER_NOT_EXPORTED)
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+    /**
+     * Re-reads which watchers are needed. Runs on every start (not just onCreate) because
+     * the service is usually already alive when a routine gains a gesture/app trigger.
+     * The accelerometer and usage poller both cost battery, so they stay off unless used.
+     */
+    private fun syncWatchers() {
+        val triggers = Store.load(this).filter { it.enabled }.flatMap { it.triggers + it.endTriggers }
+
+        runCatching { sensors?.unregisterListener(sensorListener) }
+        sensors = null
+        if (triggers.any { it is Trigger.Gesture }) {
+            sensors = getSystemService(android.hardware.SensorManager::class.java)
+            sensors?.getDefaultSensor(android.hardware.Sensor.TYPE_ACCELEROMETER)?.let {
+                sensors?.registerListener(sensorListener, it,
+                    android.hardware.SensorManager.SENSOR_DELAY_UI)
+            }
+        }
+
+        handler.removeCallbacks(appPoll)
+        if (triggers.any { it is Trigger.AppOpened } && Permissions.hasUsageAccess(this)) {
+            handler.post(appPoll)
+        }
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        syncWatchers()
+        return START_STICKY
+    }
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
         runCatching { unregisterReceiver(receiver) }
+        runCatching { sensors?.unregisterListener(sensorListener) }
+        handler.removeCallbacks(appPoll)
         super.onDestroy()
     }
 

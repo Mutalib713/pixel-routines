@@ -127,8 +127,73 @@ object Actions {
                     Thread.sleep(a.seconds.coerceIn(1, 30) * 1000L)
                     "Waited ${a.seconds}s"
                 }
+                is Action.Speak -> speak(ctx, a.text)
+                is Action.ReplyNotification -> {
+                    if (!Permissions.hasNotificationAccess(ctx)) return "Reply needs notification access"
+                    NotifRegistry.reply(ctx, a.pkg.ifBlank { null }, a.text)
+                }
+                is Action.Message -> openChat(ctx, a)
+                is Action.Call -> {
+                    if (!Permissions.hasCallPhone(ctx)) return "Call needs phone permission"
+                    val i = Intent(Intent.ACTION_CALL, android.net.Uri.parse("tel:" + a.number))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    ctx.startActivity(i)
+                    "Calling ${a.who.ifBlank { a.number }}"
+                }
+                is Action.SendSms -> {
+                    if (!Permissions.hasSendSms(ctx)) return "Text needs SMS permission"
+                    val sms = ctx.getSystemService(android.telephony.SmsManager::class.java)
+                    val parts = sms.divideMessage(a.text)
+                    if (parts.size > 1) sms.sendMultipartTextMessage(a.number, null, parts, null, null)
+                    else sms.sendTextMessage(a.number, null, a.text, null, null)
+                    "Texted ${a.who.ifBlank { a.number }}"
+                }
             }
         }.getOrElse { "${a.describe()} — failed" }
+    }
+
+    /**
+     * Speaks text aloud. TextToSpeech needs an init round-trip, so this waits briefly for
+     * the engine rather than firing into a void — we're already on a background thread.
+     */
+    private fun speak(ctx: Context, text: String): String {
+        val latch = java.util.concurrent.CountDownLatch(1)
+        var tts: android.speech.tts.TextToSpeech? = null
+        var ok = false
+        tts = android.speech.tts.TextToSpeech(ctx.applicationContext) { status ->
+            ok = status == android.speech.tts.TextToSpeech.SUCCESS
+            latch.countDown()
+        }
+        latch.await(3, java.util.concurrent.TimeUnit.SECONDS)
+        if (!ok) { runCatching { tts?.shutdown() }; return "Couldn't start text-to-speech" }
+        tts.speak(text, android.speech.tts.TextToSpeech.QUEUE_ADD, null, "routine")
+        // Let it finish before tearing the engine down.
+        Thread {
+            Thread.sleep((1500 + text.length * 90).toLong().coerceAtMost(20_000))
+            runCatching { tts.shutdown() }
+        }.start()
+        return "Said “$text”"
+    }
+
+    /**
+     * Opens a chat with the text pre-filled. WhatsApp exposes no send API, so the send tap
+     * is the user's — by design, not an oversight.
+     */
+    private fun openChat(ctx: Context, a: Action.Message): String {
+        val digits = a.number.filter { it.isDigit() || it == '+' }.removePrefix("+")
+        val i = when (a.app) {
+            MessageApp.WHATSAPP -> Intent(Intent.ACTION_VIEW, android.net.Uri.parse(
+                "https://wa.me/$digits?text=" + android.net.Uri.encode(a.text)))
+                .apply { if (Apps.whatsappPackage(ctx) != null) setPackage(Apps.whatsappPackage(ctx)) }
+            MessageApp.SMS -> Intent(Intent.ACTION_SENDTO,
+                android.net.Uri.parse("smsto:" + a.number))
+                .putExtra("sms_body", a.text)
+        }
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return runCatching {
+            ctx.startActivity(i)
+            "Opened ${a.app.label()} · ${a.who.ifBlank { a.number }}"
+        }.getOrElse { "${a.app.label()} isn't installed" }
     }
 
     private fun notify(ctx: Context, title: String, text: String) {

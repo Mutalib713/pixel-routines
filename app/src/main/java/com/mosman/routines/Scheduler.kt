@@ -33,6 +33,12 @@ object Scheduler {
         SunCalc.next(t)?.let { setAlarm(ctx, r, index, it.toInstant().toEpochMilli()) }
     }
 
+    /** Arms an alarm for the next matching calendar event's start (or end). */
+    fun scheduleCalendar(ctx: Context, r: Routine, index: Int, t: Trigger.CalendarEvent) {
+        val event = Calendars.nextMatching(ctx, t.titleContains, t.atStart) ?: return
+        setAlarm(ctx, r, index, if (t.atStart) event.begin else event.end)
+    }
+
     private fun setAlarm(ctx: Context, r: Routine, index: Int, at: Long) {
         val am = ctx.getSystemService(AlarmManager::class.java)
         val p = pi(ctx, r.id, index)

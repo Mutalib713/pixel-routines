@@ -30,6 +30,8 @@ object Engine {
 
         if (routines.any { r -> r.enabled && (r.triggers + r.endTriggers).any { it is Trigger.Location } })
             Geofences.syncAll(ctx)
+
+        Motion.sync(ctx)   // subscribes/unsubscribes driving & walking detection
     }
 
     fun arm(ctx: Context, r: Routine) {
@@ -41,8 +43,9 @@ object Engine {
         when (t) {
             is Trigger.TimeOfDay -> Scheduler.scheduleTime(ctx, r, index, t)
             is Trigger.Sun -> Scheduler.scheduleSun(ctx, r, index, t)
+            is Trigger.CalendarEvent -> Scheduler.scheduleCalendar(ctx, r, index, t)
             is Trigger.Location -> Geofences.add(ctx, r, index, t)
-            else -> Unit // event triggers are handled by EventService
+            else -> Unit // event triggers are handled by EventService / listeners
         }
     }
 
@@ -63,6 +66,7 @@ object Engine {
         when (val t = list.getOrNull(if (isEnd) index - END_OFFSET else index)) {
             is Trigger.TimeOfDay -> Scheduler.scheduleTime(ctx, r, index, t)
             is Trigger.Sun -> Scheduler.scheduleSun(ctx, r, index, t)
+            is Trigger.CalendarEvent -> Scheduler.scheduleCalendar(ctx, r, index, t)
             else -> Unit
         }
     }
@@ -155,8 +159,11 @@ object Engine {
     private fun allStateTriggersTrue(ctx: Context, r: Routine): Boolean =
         r.triggers.all { State.isTrue(ctx, it) != false }
 
+    /** True for triggers the EventService must stay alive to notice. */
     private fun isEventTrigger(t: Trigger): Boolean = when (t) {
-        is Trigger.TimeOfDay, is Trigger.Sun, is Trigger.Location -> false // alarm/geofence-based
+        // Handled by alarms, geofences, or their own listener services instead:
+        is Trigger.TimeOfDay, is Trigger.Sun, is Trigger.CalendarEvent, is Trigger.Location,
+        is Trigger.NotificationFrom, is Trigger.Motion, is Trigger.NfcTag -> false
         else -> true
     }
 

@@ -32,6 +32,27 @@ object Presets {
                 actions = listOf(Action.BatterySaver(true)),
                 endTriggers = listOf(Trigger.Battery(below = false, level = 40)))
         },
+        Preset("Auto-reply to WhatsApp while you're driving") {
+            base("Driving replies", "car",
+                triggers = listOf(Trigger.Motion(MotionType.VEHICLE, entering = true)),
+                actions = listOf(
+                    Action.Dnd(true),
+                    Action.ReplyNotification("I'm driving right now — I'll call you back.",
+                        "com.whatsapp", "WhatsApp")),
+                endTriggers = listOf(Trigger.Motion(MotionType.VEHICLE, entering = false)))
+        },
+        Preset("Flip face-down to silence the phone instantly") {
+            base("Flip to silence", "silent",
+                triggers = listOf(Trigger.Gesture(GestureType.FLIP_DOWN)),
+                actions = listOf(Action.Ringer(RingerMode.SILENT)),
+                endTriggers = listOf(Trigger.Gesture(GestureType.FLIP_UP)))
+        },
+        Preset("Silent while anything is on your calendar") {
+            base("In a meeting", "calendar",
+                triggers = listOf(Trigger.CalendarEvent("", atStart = true)),
+                actions = listOf(Action.Ringer(RingerMode.VIBRATE)),
+                endTriggers = listOf(Trigger.CalendarEvent("", atStart = false)))
+        },
         Preset("Do Not Disturb while your car is connected") {
             base("Driving", "car",
                 triggers = listOf(Trigger.Bluetooth(connected = true, deviceName = null)),

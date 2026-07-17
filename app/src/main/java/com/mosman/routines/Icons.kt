@@ -1,8 +1,8 @@
 package com.mosman.routines
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.*
 import androidx.compose.ui.graphics.vector.ImageVector
 
 /**
@@ -59,6 +59,14 @@ object Ic {
         "flash" to Icons.Filled.FlashlightOn,
         "notify" to Icons.Filled.NotificationsNone,
         "check" to Icons.Filled.CheckCircle,
+        "chat" to Icons.Filled.Chat,
+        "call" to Icons.Filled.Call,
+        "calendar" to Icons.Filled.Event,
+        "walk" to Icons.Filled.DirectionsWalk,
+        "bike" to Icons.Filled.DirectionsBike,
+        "nfc" to Icons.Filled.Nfc,
+        "speak" to Icons.Filled.RecordVoiceOver,
+        "reply" to Icons.AutoMirrored.Filled.Reply,
     )
 
     fun of(key: String): ImageVector = map[key] ?: Icons.Filled.AutoAwesome

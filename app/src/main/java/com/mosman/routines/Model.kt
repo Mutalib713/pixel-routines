@@ -110,6 +110,58 @@ sealed class Trigger {
         override fun toJson() = JSONObject().put("t", "air").put("on", on)
     }
 
+    /** A notification arrives from an app, optionally containing some text. */
+    data class NotificationFrom(val pkg: String, val label: String, val contains: String) : Trigger() {
+        override fun icon() = "notify"
+        override fun describe(): String {
+            val what = if (contains.isBlank()) "" else " saying “$contains”"
+            return "$label notification$what"
+        }
+        override fun toJson() = JSONObject().put("t", "notif").put("pkg", pkg)
+            .put("label", label).put("contains", contains)
+    }
+
+    /** A calendar event starts or ends. */
+    data class CalendarEvent(val titleContains: String, val atStart: Boolean) : Trigger() {
+        override fun icon() = "calendar"
+        override fun describe(): String {
+            val which = if (titleContains.isBlank()) "any event" else "“$titleContains”"
+            return "$which ${if (atStart) "starts" else "ends"} on my calendar"
+        }
+        override fun toJson() = JSONObject().put("t", "cal")
+            .put("title", titleContains).put("start", atStart)
+    }
+
+    /** You start (or stop) driving, walking, cycling, running. */
+    data class Motion(val type: MotionType, val entering: Boolean) : Trigger() {
+        override fun icon() = type.icon()
+        override fun describe() =
+            "${if (entering) "You start" else "You stop"} ${type.verb()}"
+        override fun toJson() = JSONObject().put("t", "motion")
+            .put("type", type.name).put("in", entering)
+    }
+
+    /** A physical gesture: phone placed face-down, or shaken. */
+    data class Gesture(val type: GestureType) : Trigger() {
+        override fun icon() = "screen"
+        override fun describe() = type.label()
+        override fun toJson() = JSONObject().put("t", "gesture").put("type", type.name)
+    }
+
+    /** An app is brought to the foreground. */
+    data class AppOpened(val pkg: String, val label: String) : Trigger() {
+        override fun icon() = "app"
+        override fun describe() = "You open $label"
+        override fun toJson() = JSONObject().put("t", "appopen").put("pkg", pkg).put("label", label)
+    }
+
+    /** An NFC tag is tapped. */
+    data class NfcTag(val id: String, val label: String) : Trigger() {
+        override fun icon() = "nfc"
+        override fun describe() = "You tap the “$label” NFC tag"
+        override fun toJson() = JSONObject().put("t", "nfc").put("id", id).put("label", label)
+    }
+
     /** Sunrise or sunset at a chosen place, with an optional offset in minutes. */
     data class Sun(val sunrise: Boolean, val offsetMin: Int,
                    val lat: Double, val lng: Double, val place: String) : Trigger() {
@@ -141,6 +193,15 @@ sealed class Trigger {
             "air" -> Airplane(o.getBoolean("on"))
             "sun" -> Sun(o.getBoolean("rise"), o.optInt("off", 0),
                 o.getDouble("lat"), o.getDouble("lng"), o.optString("place", "here"))
+            "notif" -> NotificationFrom(o.optString("pkg"), o.optString("label"), o.optString("contains"))
+            "cal" -> CalendarEvent(o.optString("title"), o.optBoolean("start", true))
+            "motion" -> Motion(
+                runCatching { MotionType.valueOf(o.getString("type")) }.getOrDefault(MotionType.VEHICLE),
+                o.optBoolean("in", true))
+            "gesture" -> Gesture(
+                runCatching { GestureType.valueOf(o.getString("type")) }.getOrDefault(GestureType.FLIP_DOWN))
+            "appopen" -> AppOpened(o.optString("pkg"), o.optString("label"))
+            "nfc" -> NfcTag(o.optString("id"), o.optString("label"))
             else -> Screen(true)
         }
     }
@@ -187,7 +248,7 @@ sealed class Condition {
 //  Actions  (the "THEN")
 // ============================================================================
 
-enum class Access { NONE, DND, WRITE_SETTINGS, SECURE_SETTINGS, SHIZUKU }
+enum class Access { NONE, DND, WRITE_SETTINGS, SECURE_SETTINGS, SHIZUKU, CALL, SMS, NOTIF_ACCESS }
 
 sealed class Action {
     abstract fun describe(): String
@@ -292,6 +353,48 @@ sealed class Action {
         override fun access() = Access.NONE
         override fun toJson() = JSONObject().put("a", "wait").put("s", seconds)
     }
+    /** Opens a chat with the message already typed. The send tap stays with you. */
+    data class Message(val app: MessageApp, val number: String, val who: String, val text: String) : Action() {
+        override fun icon() = "chat"
+        override fun describe() = "Open ${app.label()} chat with ${who.ifBlank { number }}"
+        override fun access() = Access.NONE
+        override fun toJson() = JSONObject().put("a", "msg").put("app", app.name)
+            .put("num", number).put("who", who).put("text", text)
+    }
+    /** Places the call for real — no dialer, no tap. */
+    data class Call(val number: String, val who: String) : Action() {
+        override fun icon() = "call"
+        override fun describe() = "Call ${who.ifBlank { number }}"
+        override fun access() = Access.CALL
+        override fun toJson() = JSONObject().put("a", "call").put("num", number).put("who", who)
+    }
+    /** Sends an SMS silently. */
+    data class SendSms(val number: String, val who: String, val text: String) : Action() {
+        override fun icon() = "chat"
+        override fun describe() = "Text ${who.ifBlank { number }}"
+        override fun access() = Access.SMS
+        override fun toJson() = JSONObject().put("a", "sms").put("num", number)
+            .put("who", who).put("text", text)
+    }
+    /** Says something out loud. */
+    data class Speak(val text: String) : Action() {
+        override fun icon() = "speak"
+        override fun describe() = "Say “$text”"
+        override fun access() = Access.NONE
+        override fun toJson() = JSONObject().put("a", "speak").put("text", text)
+    }
+    /**
+     * Replies to the newest repliable notification — the trick that makes hands-free
+     * WhatsApp replies possible. Pair it with a NotificationFrom trigger.
+     */
+    data class ReplyNotification(val text: String, val pkg: String, val label: String) : Action() {
+        override fun icon() = "reply"
+        override fun describe() =
+            "Reply to ${label.ifBlank { "the last message" }}: “$text”"
+        override fun access() = Access.NOTIF_ACCESS
+        override fun toJson() = JSONObject().put("a", "reply").put("text", text)
+            .put("pkg", pkg).put("label", label)
+    }
 
     companion object {
         fun fromJson(o: JSONObject): Action = when (o.getString("a")) {
@@ -312,6 +415,13 @@ sealed class Action {
                 .getOrDefault(MediaKey.PLAY_PAUSE))
             "url" -> OpenUrl(o.getString("url"))
             "wait" -> Wait(o.optInt("s", 3).coerceIn(1, 30))
+            "msg" -> Message(
+                runCatching { MessageApp.valueOf(o.getString("app")) }.getOrDefault(MessageApp.WHATSAPP),
+                o.optString("num"), o.optString("who"), o.optString("text"))
+            "call" -> Call(o.optString("num"), o.optString("who"))
+            "sms" -> SendSms(o.optString("num"), o.optString("who"), o.optString("text"))
+            "speak" -> Speak(o.optString("text"))
+            "reply" -> ReplyNotification(o.optString("text"), o.optString("pkg"), o.optString("label"))
             else -> Notify("Routine", "")
         }
     }
@@ -320,6 +430,30 @@ sealed class Action {
 enum class MediaKey { PLAY_PAUSE, NEXT, PREVIOUS;
     fun label() = when (this) {
         PLAY_PAUSE -> "Play / pause media"; NEXT -> "Next track"; PREVIOUS -> "Previous track"
+    }
+}
+
+enum class MessageApp { WHATSAPP, SMS;
+    fun label() = when (this) { WHATSAPP -> "WhatsApp"; SMS -> "Messages" }
+}
+
+enum class MotionType { VEHICLE, WALKING, RUNNING, BICYCLE, STILL;
+    fun verb() = when (this) {
+        VEHICLE -> "driving"; WALKING -> "walking"; RUNNING -> "running"
+        BICYCLE -> "cycling"; STILL -> "sitting still"
+    }
+    fun label() = verb().replaceFirstChar { it.uppercase() }
+    fun icon() = when (this) {
+        VEHICLE -> "car"; WALKING -> "walk"; RUNNING -> "fitness"
+        BICYCLE -> "bike"; STILL -> "meditation"
+    }
+}
+
+enum class GestureType { FLIP_DOWN, FLIP_UP, SHAKE;
+    fun label() = when (this) {
+        FLIP_DOWN -> "Phone placed face-down"
+        FLIP_UP -> "Phone turned face-up"
+        SHAKE -> "Phone shaken"
     }
 }
 

@@ -42,6 +42,48 @@
     <!-- Shizuku: the restricted Wi-Fi / Bluetooth / airplane toggles -->
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
 
+    <!-- Place a call / send an SMS straight from a routine -->
+    <uses-permission android:name="android.permission.CALL_PHONE" />
+    <uses-permission android:name="android.permission.SEND_SMS" />
+
+    <!-- Calendar triggers ("silent while a lecture is on") -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+
+    <!-- Driving / walking detection -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+
+    <!-- NFC tag triggers -->
+    <uses-permission android:name="android.permission.NFC" />
+    <uses-feature android:name="android.hardware.nfc" android:required="false" />
+
+    <!-- Notice which app you opened (user grants Usage access) -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
+
+    <!--
+      Android 11+ hides other apps unless they're declared here. Without this the
+      "Open an app" list comes back empty and WhatsApp links can't be targeted.
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SENDTO" />
+            <data android:scheme="smsto" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.DIAL" />
+        </intent>
+        <package android:name="com.whatsapp" />
+        <package android:name="com.whatsapp.w4b" />
+    </queries>
+
     <application
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
@@ -99,6 +141,40 @@
             android:name=".WidgetService"
             android:exported="false"
             android:permission="android.permission.BIND_REMOTEVIEWS" />
+
+        <!-- Runs one routine and closes — target for home-screen shortcuts -->
+        <activity
+            android:name=".RunActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.NoDisplay" />
+
+        <!-- Launched when an NFC tag is tapped -->
+        <activity
+            android:name=".NfcActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTop"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.nfc.action.TAG_DISCOVERED" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!-- Notification triggers + hands-free replies -->
+        <service
+            android:name=".NotifService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <!-- Driving / walking transitions -->
+        <receiver android:name=".MotionReceiver" android:exported="false" />
 
         <!-- Quick Settings tile: pause/resume all routines -->
         <service

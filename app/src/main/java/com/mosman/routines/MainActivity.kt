@@ -299,6 +299,38 @@ private fun PermissionArea(routines: List<Routine>, tick: Int, refresh: () -> Un
             !Permissions.hasWriteSettings(ctx)
     }
     val needNotif = remember(tick) { Build.VERSION.SDK_INT >= 33 && !Permissions.hasNotifications(ctx) }
+    val needCall = remember(tick, routines) {
+        routines.any { r -> r.actions.any { it.access() == Access.CALL } } && !Permissions.hasCallPhone(ctx)
+    }
+    val needSms = remember(tick, routines) {
+        routines.any { r -> r.actions.any { it.access() == Access.SMS } } && !Permissions.hasSendSms(ctx)
+    }
+    val callLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()) { refresh() }
+    val smsLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()) { refresh() }
+    val calLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()) { refresh() }
+    val actLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()) { refresh() }
+
+    val allTriggers = routines.filter { it.enabled }.flatMap { it.triggers + it.endTriggers }
+    val allActions = routines.filter { it.enabled }.flatMap { it.actions + it.endActions }
+
+    val needNotifAccess = remember(tick, routines) {
+        (allTriggers.any { it is Trigger.NotificationFrom } ||
+            allActions.any { it.access() == Access.NOTIF_ACCESS }) &&
+            !Permissions.hasNotificationAccess(ctx)
+    }
+    val needCalendar = remember(tick, routines) {
+        allTriggers.any { it is Trigger.CalendarEvent } && !Permissions.hasCalendar(ctx)
+    }
+    val needActivity = remember(tick, routines) {
+        allTriggers.any { it is Trigger.Motion } && !Permissions.hasActivityRecognition(ctx)
+    }
+    val needUsage = remember(tick, routines) {
+        allTriggers.any { it is Trigger.AppOpened } && !Permissions.hasUsageAccess(ctx)
+    }
     val needLoc = remember(tick, routines) {
         routines.any { r -> (r.triggers + r.endTriggers).any { it is Trigger.Location } } &&
             !Permissions.hasBackgroundLocation(ctx)
@@ -320,6 +352,30 @@ private fun PermissionArea(routines: List<Routine>, tick: Int, refresh: () -> Un
         if (needNotif) PermCard("Allow notifications",
             "Get a confirmation when a routine runs.") {
             notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        if (needCall) PermCard("Allow phone calls",
+            "One of your routines places a call on its own.") {
+            callLauncher.launch(Manifest.permission.CALL_PHONE)
+        }
+        if (needSms) PermCard("Allow sending SMS",
+            "One of your routines sends a text on its own.") {
+            smsLauncher.launch(Manifest.permission.SEND_SMS)
+        }
+        if (needNotifAccess) PermCard("Allow notification access",
+            "Needed to trigger on notifications and to reply to them. Find Pixel Routines in the list.") {
+            ctx.startActivity(Permissions.notificationAccessSettings())
+        }
+        if (needCalendar) PermCard("Allow reading your calendar",
+            "So routines can follow your timetable.") {
+            calLauncher.launch(Manifest.permission.READ_CALENDAR)
+        }
+        if (needActivity) PermCard("Allow activity detection",
+            "So your phone knows when you start driving or walking.") {
+            actLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION)
+        }
+        if (needUsage) PermCard("Allow usage access",
+            "So routines can notice which app you opened. Find Pixel Routines in the list.") {
+            ctx.startActivity(Permissions.usageAccessSettings())
         }
     }
 }

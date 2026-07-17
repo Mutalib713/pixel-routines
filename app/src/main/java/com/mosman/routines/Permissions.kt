@@ -35,6 +35,36 @@ object Permissions {
 
     fun hasSecureSettings(ctx: Context) = Secure.canWriteSecure(ctx)
 
+    fun hasCallPhone(ctx: Context) =
+        ctx.checkSelfPermission(Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED
+
+    fun hasSendSms(ctx: Context) =
+        ctx.checkSelfPermission(Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED
+
+    fun hasCalendar(ctx: Context) =
+        ctx.checkSelfPermission(Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED
+
+    fun hasActivityRecognition(ctx: Context) = Build.VERSION.SDK_INT < 29 ||
+        ctx.checkSelfPermission(Manifest.permission.ACTIVITY_RECOGNITION) == PackageManager.PERMISSION_GRANTED
+
+    /** Notification access — needed to trigger on notifications and to reply to them. */
+    fun hasNotificationAccess(ctx: Context): Boolean = runCatching {
+        Settings.Secure.getString(ctx.contentResolver, "enabled_notification_listeners")
+            ?.contains(ctx.packageName) == true
+    }.getOrDefault(false)
+
+    fun notificationAccessSettings() = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+
+    /** Usage access — needed to notice which app you just opened. */
+    fun hasUsageAccess(ctx: Context): Boolean = runCatching {
+        val ops = ctx.getSystemService(android.app.AppOpsManager::class.java)
+        val mode = ops.unsafeCheckOpNoThrow("android:get_usage_stats",
+            android.os.Process.myUid(), ctx.packageName)
+        mode == android.app.AppOpsManager.MODE_ALLOWED
+    }.getOrDefault(false)
+
+    fun usageAccessSettings() = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
+
     fun dndSettings() = Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)
 
     fun exactAlarmSettings(ctx: Context) =
@@ -69,6 +99,9 @@ object Permissions {
                 Access.WRITE_SETTINGS -> !hasWriteSettings(ctx)
                 Access.SECURE_SETTINGS -> !hasSecureSettings(ctx)
                 Access.SHIZUKU -> !ShizukuBridge.ready
+                Access.CALL -> !hasCallPhone(ctx)
+                Access.SMS -> !hasSendSms(ctx)
+                Access.NOTIF_ACCESS -> !hasNotificationAccess(ctx)
             }
         }
     }
