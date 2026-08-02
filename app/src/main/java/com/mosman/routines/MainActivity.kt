@@ -9,6 +9,7 @@ import android.content.Context
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -74,6 +75,14 @@ private fun AppRoot(tick: Int, refresh: () -> Unit) {
     }
     var routines by remember { mutableStateOf(Store.load(ctx)) }
     fun reload() { routines = Store.load(ctx) }
+
+    // Every screen past Home is a swap of `screen`, not a real back-stack entry, so the
+    // system back gesture would close the app instead of stepping back one screen. Send it
+    // to the same place the top-bar arrow goes. Onboarding is left alone: it is the
+    // first-run flow, and backing out of it should still leave the app.
+    BackHandler(enabled = screen !is Screen.Home && screen !is Screen.Onboarding) {
+        screen = Screen.Home
+    }
 
     when (val s = screen) {
         is Screen.Onboarding -> Onboarding(tick) { screen = Screen.Home }
