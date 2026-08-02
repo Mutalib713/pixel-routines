@@ -82,9 +82,14 @@ object Engine {
     /** Live device events from EventService. */
     fun handleEvent(ctx: Context, matcher: (Trigger) -> Boolean) {
         Store.load(ctx).filter { it.enabled }.forEach { r ->
+            val running = r.hasEnd && Store.isActive(ctx, r.id)
             when {
-                r.triggers.any(matcher) -> fireRoutine(ctx, r)
-                r.endTriggers.any(matcher) -> endRoutine(ctx, r)
+                // Firing again while it is already running would re-snapshot the settings
+                // this routine itself just changed, so the UNTIL side would "restore" them
+                // to the values it was meant to undo. Ending one that never started would
+                // replay a stale snapshot for the same reason.
+                r.triggers.any(matcher) -> if (!running) fireRoutine(ctx, r)
+                r.endTriggers.any(matcher) -> if (running) endRoutine(ctx, r)
             }
         }
     }
@@ -96,12 +101,15 @@ object Engine {
             onComplete?.invoke(); return
         }
         val app = ctx.applicationContext
+        // Mark it running before the work starts, not after: actions can take seconds (Wait
+        // sleeps for up to 30), and an end trigger that lands mid-run still has to find the
+        // routine active or it will be ignored.
+        if (r.hasEnd) Store.setActive(app, r.id, true)
         Thread {
             // Remember the "before" state so the end condition can put it back.
             if (r.hasEnd && r.endMode == EndMode.REVERT)
                 Snapshot.save(app, r.id, Snapshot.capture(app, r))
             val results = Actions.runAll(app, r)
-            if (r.hasEnd) Store.setActive(app, r.id, true)
             RunLog.add(app, r, "ran", results)
             if (r.notifyOnRun) Actions.notifyRan(app, r, results)
             RoutinesWidget.refresh(app)

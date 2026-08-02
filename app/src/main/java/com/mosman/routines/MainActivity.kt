@@ -144,7 +144,9 @@ private fun HomeScreen(
     ) { pad ->
         LazyColumn(
             Modifier.fillMaxSize().padding(pad),
-            contentPadding = PaddingValues(16.dp),
+            // Extra room at the bottom so the last routine can scroll clear of the
+            // floating "New routine" button instead of sitting under it.
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 96.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             if (paused) item {

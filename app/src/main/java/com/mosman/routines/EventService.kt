@@ -27,29 +27,41 @@ class EventService : Service() {
     private var sensors: android.hardware.SensorManager? = null
     private var faceDown = false
     private var lastShake = 0L
+    private var lastFlip = 0L
     private val sensorListener = object : android.hardware.SensorEventListener {
         override fun onAccuracyChanged(s: android.hardware.Sensor?, a: Int) {}
         override fun onSensorChanged(e: android.hardware.SensorEvent) {
             val (x, y, z) = Triple(e.values[0], e.values[1], e.values[2])
+            val g = kotlin.math.sqrt(x * x + y * y + z * z)
+            val now = System.currentTimeMillis()
 
             // Face-down / face-up: gravity on Z flips sign past a comfortable margin.
-            val nowDown = z < -8.5f
-            val nowUp = z > 8.5f
-            if (nowDown && !faceDown) {
-                faceDown = true
-                Engine.handleEvent(this@EventService) {
-                    it is Trigger.Gesture && it.type == GestureType.FLIP_DOWN
-                }
-            } else if (nowUp && faceDown) {
-                faceDown = false
-                Engine.handleEvent(this@EventService) {
-                    it is Trigger.Gesture && it.type == GestureType.FLIP_UP
+            //
+            // values[] is *total* acceleration, so the hand movement of a real flip adds
+            // several m/s² on top of gravity and can cross both margins on the way round —
+            // one physical flip then fires down, up and down again. Only trust the reading
+            // once the phone has settled back to roughly 1g, and leave a gap between
+            // transitions so the wobble after it lands doesn't count as another flip.
+            val settled = kotlin.math.abs(g - 9.81f) < 1.5f
+            if (settled && now - lastFlip > FLIP_GAP_MS) {
+                val nowDown = z < -8.5f
+                val nowUp = z > 8.5f
+                if (nowDown && !faceDown) {
+                    faceDown = true
+                    lastFlip = now
+                    Engine.handleEvent(this@EventService) {
+                        it is Trigger.Gesture && it.type == GestureType.FLIP_DOWN
+                    }
+                } else if (nowUp && faceDown) {
+                    faceDown = false
+                    lastFlip = now
+                    Engine.handleEvent(this@EventService) {
+                        it is Trigger.Gesture && it.type == GestureType.FLIP_UP
+                    }
                 }
             }
 
             // Shake: total acceleration well past gravity, debounced.
-            val g = kotlin.math.sqrt(x * x + y * y + z * z)
-            val now = System.currentTimeMillis()
             if (g > 26f && now - lastShake > 1500) {
                 lastShake = now
                 Engine.handleEvent(this@EventService) {
@@ -227,6 +239,9 @@ class EventService : Service() {
     companion object {
         private const val CHANNEL = "service"
         private const val SERVICE_ID = 7
+
+        /** Minimum gap between face-down/face-up transitions. */
+        private const val FLIP_GAP_MS = 700L
 
         fun start(ctx: Context) {
             val i = Intent(ctx, EventService::class.java)
