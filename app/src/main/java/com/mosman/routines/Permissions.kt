@@ -86,23 +86,24 @@ object Permissions {
         return if (clean.isBlank() || clean == "<unknown ssid>") null else clean
     }
 
+    /** Whether the special access an action needs is already in place. */
+    fun has(ctx: Context, acc: Access): Boolean = when (acc) {
+        Access.NONE -> true
+        Access.DND -> hasDnd(ctx)
+        Access.WRITE_SETTINGS -> hasWriteSettings(ctx)
+        Access.SECURE_SETTINGS -> hasSecureSettings(ctx)
+        Access.SHIZUKU -> ShizukuBridge.ready
+        Access.CALL -> hasCallPhone(ctx)
+        Access.SMS -> hasSendSms(ctx)
+        Access.NOTIF_ACCESS -> hasNotificationAccess(ctx)
+    }
+
     /** Which accesses a set of routines actually needs, and whether each is granted. */
     fun needed(ctx: Context, routines: List<Routine>): List<Access> {
         val used = buildSet {
             add(Access.DND) // ringer/dnd extremely common; always surface if missing
             routines.forEach { r -> r.actions.forEach { add(it.access()) } }
         }
-        return used.filter { acc ->
-            when (acc) {
-                Access.NONE -> false
-                Access.DND -> !hasDnd(ctx)
-                Access.WRITE_SETTINGS -> !hasWriteSettings(ctx)
-                Access.SECURE_SETTINGS -> !hasSecureSettings(ctx)
-                Access.SHIZUKU -> !ShizukuBridge.ready
-                Access.CALL -> !hasCallPhone(ctx)
-                Access.SMS -> !hasSendSms(ctx)
-                Access.NOTIF_ACCESS -> !hasNotificationAccess(ctx)
-            }
-        }
+        return used.filter { it != Access.NONE && !has(ctx, it) }
     }
 }

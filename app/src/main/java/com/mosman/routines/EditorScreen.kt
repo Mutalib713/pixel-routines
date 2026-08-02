@@ -2,6 +2,7 @@
 
 package com.mosman.routines
 
+import android.content.Context
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -207,7 +208,7 @@ fun EditorScreen(
                 ItemRow(a.icon(), a.describe(),
                     onClick = { editAction = ActEdit(kindOf(a), i, false) },
                     onRemove = { actions.removeAt(i) },
-                    badge = accessBadge(a.access()))
+                    badge = accessBadge(ctx, a.access()))
             }
             AddButton("Add action") { actionSheetFor = false }
 
@@ -239,7 +240,7 @@ fun EditorScreen(
                         ItemRow(a.icon(), a.describe(),
                             onClick = { editAction = ActEdit(kindOf(a), i, true) },
                             onRemove = { endActions.removeAt(i) },
-                            badge = accessBadge(a.access()))
+                            badge = accessBadge(ctx, a.access()))
                     }
                     AddButton("Add end action") { actionSheetFor = true }
                 }
@@ -287,7 +288,7 @@ fun EditorScreen(
     }
     actionSheetFor?.let { isEnd ->
         PickSheet("Choose an action", ActionKind.entries,
-            { it.icon }, { it.label }, { accessNote(it.access) },
+            { it.icon }, { it.label }, { accessNote(ctx, it.access) },
             onDismiss = { actionSheetFor = null }) {
             actionSheetFor = null; editAction = ActEdit(it, null, isEnd)
         }
@@ -1152,19 +1153,31 @@ private fun kindOfCond(c: Condition): ConditionKind = when (c) {
     is Condition.WhileCharging -> ConditionKind.CHARGING
 }
 
-private fun accessBadge(a: Access): String? = when (a) {
-    Access.SHIZUKU -> "needs Shizuku"
-    Access.SECURE_SETTINGS -> "needs ADB grant"
-    else -> null
+/**
+ * Warning chip on an action that cannot run yet. These read as "this is broken", so they
+ * have to reflect what is actually missing — an action whose access is already granted
+ * gets no chip at all.
+ */
+private fun accessBadge(ctx: Context, a: Access): String? {
+    if (Permissions.has(ctx, a)) return null
+    return when (a) {
+        Access.SHIZUKU -> "needs Shizuku"
+        Access.SECURE_SETTINGS -> "needs ADB grant"
+        else -> null
+    }
 }
 
-private fun accessNote(a: Access): String = when (a) {
-    Access.DND -> "Needs DND access"
-    Access.WRITE_SETTINGS -> "Needs system-settings access"
-    Access.SECURE_SETTINGS -> "Needs one-time ADB grant"
-    Access.SHIZUKU -> "Restricted — needs Shizuku"
-    Access.CALL -> "Dials for real — needs phone permission"
-    Access.SMS -> "Sends silently — needs SMS permission"
-    Access.NOTIF_ACCESS -> "Needs notification access"
-    Access.NONE -> ""
+/** Same rule for the action picker: only mention an access you still have to give. */
+private fun accessNote(ctx: Context, a: Access): String {
+    if (Permissions.has(ctx, a)) return ""
+    return when (a) {
+        Access.DND -> "Needs DND access"
+        Access.WRITE_SETTINGS -> "Needs system-settings access"
+        Access.SECURE_SETTINGS -> "Needs one-time ADB grant"
+        Access.SHIZUKU -> "Restricted — needs Shizuku"
+        Access.CALL -> "Dials for real — needs phone permission"
+        Access.SMS -> "Sends silently — needs SMS permission"
+        Access.NOTIF_ACCESS -> "Needs notification access"
+        Access.NONE -> ""
+    }
 }
