@@ -64,6 +64,7 @@ private enum class TriggerKind(val icon: String, val label: String, val sub: Str
 }
 
 private enum class ActionKind(val icon: String, val label: String, val access: Access) {
+    REMIND("alarm", "Remind me", Access.FULL_SCREEN),
     RINGER("ringer", "Ringer mode", Access.DND),
     DND("dnd", "Do Not Disturb", Access.DND),
     VOLUME("volume", "Set a volume", Access.NONE),
@@ -83,7 +84,7 @@ private enum class ActionKind(val icon: String, val label: String, val access: A
     SPEAK("speak", "Say something out loud", Access.NONE),
     MEDIA("music", "Media control", Access.NONE),
     FLASH("flash", "Flashlight", Access.NONE),
-    NOTIFY("notify", "Show a reminder", Access.NONE),
+    NOTIFY("notify", "Show a notification", Access.NONE),
     WAIT("schedule", "Wait between actions", Access.NONE),
 }
 
@@ -900,10 +901,28 @@ private fun ActionConfig(kind: ActionKind, existing: Action?, onDismiss: () -> U
             val a = existing as? Action.Notify
             var title by remember { mutableStateOf(a?.title ?: "") }
             var text by remember { mutableStateOf(a?.text ?: "") }
-            ConfigDialog("Show a reminder", canSave = title.isNotBlank(), onDismiss = onDismiss,
+            ConfigDialog("Show a notification", canSave = title.isNotBlank(), onDismiss = onDismiss,
                 onSave = { onSave(Action.Notify(title, text)) }) {
                 InputField("Title", title) { title = it }
                 InputField("Message", text) { text = it }
+            }
+        }
+        ActionKind.REMIND -> {
+            val a = existing as? Action.Remind
+            var text by remember { mutableStateOf(a?.text ?: "") }
+            var snooze by remember { mutableIntStateOf(a?.snoozeMin ?: 10) }
+            ConfigDialog("Remind me", canSave = text.isNotBlank(), onDismiss = onDismiss,
+                onSave = { onSave(Action.Remind(text.trim(), snooze)) }) {
+                InputField("Remind me to…", text) { text = it }
+                Text("Takes over the screen with a sound, like an alarm — even locked.",
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(12.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Snooze for", fontSize = 14.sp)
+                    Text("$snooze min", fontWeight = FontWeight.SemiBold)
+                }
+                Slider(value = snooze.toFloat(), onValueChange = { snooze = it.toInt() },
+                    valueRange = 1f..60f)
             }
         }
         ActionKind.WEBSITE -> {
@@ -1159,6 +1178,7 @@ private fun kindOf(a: Action): ActionKind = when (a) {
     is Action.Media -> ActionKind.MEDIA
     is Action.Flashlight -> ActionKind.FLASH
     is Action.Notify -> ActionKind.NOTIFY
+    is Action.Remind -> ActionKind.REMIND
     is Action.Wait -> ActionKind.WAIT
 }
 
@@ -1194,6 +1214,7 @@ private fun accessNote(ctx: Context, a: Access): String {
         Access.CALL -> "Dials for real — needs phone permission"
         Access.SMS -> "Sends silently — needs SMS permission"
         Access.NOTIF_ACCESS -> "Needs notification access"
+        Access.FULL_SCREEN -> "Needs permission to take over the screen"
         Access.NONE -> ""
     }
 }

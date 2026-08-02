@@ -60,7 +60,8 @@ object Snapshot {
                 is Action.LaunchApp, is Action.Flashlight, is Action.Notify,
                 is Action.Media, is Action.OpenUrl, is Action.Wait,
                 is Action.Message, is Action.Call, is Action.SendSms,
-                is Action.Speak, is Action.ReplyNotification -> null
+                is Action.Speak, is Action.ReplyNotification,
+                is Action.Remind -> null
             }
         }.getOrNull()
     }

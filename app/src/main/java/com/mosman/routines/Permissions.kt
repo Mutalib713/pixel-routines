@@ -55,6 +55,15 @@ object Permissions {
 
     fun notificationAccessSettings() = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
 
+    /** Whether a reminder can take over the screen, or would arrive as a plain notification. */
+    fun hasFullScreen(ctx: Context): Boolean = runCatching {
+        ctx.getSystemService(NotificationManager::class.java).canUseFullScreenIntent()
+    }.getOrDefault(true)
+
+    fun fullScreenSettings(ctx: Context) =
+        Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,
+            Uri.parse("package:${ctx.packageName}"))
+
     /** Usage access — needed to notice which app you just opened. */
     fun hasUsageAccess(ctx: Context): Boolean = runCatching {
         val ops = ctx.getSystemService(android.app.AppOpsManager::class.java)
@@ -96,6 +105,7 @@ object Permissions {
         Access.CALL -> hasCallPhone(ctx)
         Access.SMS -> hasSendSms(ctx)
         Access.NOTIF_ACCESS -> hasNotificationAccess(ctx)
+        Access.FULL_SCREEN -> hasFullScreen(ctx)
     }
 
     /** Which accesses a set of routines actually needs, and whether each is granted. */

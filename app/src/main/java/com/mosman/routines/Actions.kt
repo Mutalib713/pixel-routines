@@ -16,11 +16,15 @@ object Actions {
 
     fun runAll(ctx: Context, r: Routine): List<String> {
         val out = mutableListOf<String>()
-        for (a in r.actions) out += runOne(ctx, a)
+        for (a in r.actions) out += runOne(ctx, a, r.id)
         return out
     }
 
-    fun runOne(ctx: Context, a: Action): String {
+    /**
+     * [remindId] only matters to Action.Remind, which keys its alert off the routine so a
+     * re-fire replaces its own reminder instead of stacking a second one.
+     */
+    fun runOne(ctx: Context, a: Action, remindId: Long = 0L): String {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         val am = ctx.getSystemService(AudioManager::class.java)
         val dnd = nm.isNotificationPolicyAccessGranted
@@ -106,6 +110,7 @@ object Actions {
                     notify(ctx, a.title, a.text)
                     "Notified"
                 }
+                is Action.Remind -> Reminders.raise(ctx, remindId, a.text, a.snoozeMin)
                 is Action.Media -> {
                     val code = when (a.key) {
                         MediaKey.PLAY_PAUSE -> android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE

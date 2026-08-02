@@ -12,6 +12,20 @@ import com.google.android.gms.location.GeofencingEvent
  */
 class AlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        // A snoozed reminder comes back on its own alarm and re-raises just that reminder,
+        // rather than running the whole routine again.
+        if (intent.action == Reminders.ACTION_SNOOZE) {
+            val rid = intent.getLongExtra(Reminders.EXTRA_ROUTINE, 0L)
+            val text = intent.getStringExtra(Reminders.EXTRA_TEXT).orEmpty()
+            val mins = intent.getIntExtra(Reminders.EXTRA_SNOOZE, 10)
+            val pending = goAsync()
+            Thread {
+                val line = Reminders.raise(context, rid, text, mins)
+                Store.get(context, rid)?.let { RunLog.add(context, it, "reminded", listOf(line)) }
+                pending.finish()
+            }.start()
+            return
+        }
         val id = intent.getLongExtra(Scheduler.EXTRA_ID, -1L)
         val index = intent.getIntExtra(Scheduler.EXTRA_INDEX, 0)
         if (id <= 0) return

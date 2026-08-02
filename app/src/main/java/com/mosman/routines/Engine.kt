@@ -122,8 +122,8 @@ object Engine {
         val app = ctx.applicationContext
         Thread {
             val results = when (r.endMode) {
-                EndMode.REVERT -> Snapshot.load(app, r.id).map { Actions.runOne(app, it) }
-                EndMode.CUSTOM -> r.endActions.map { Actions.runOne(app, it) }
+                EndMode.REVERT -> Snapshot.load(app, r.id).map { Actions.runOne(app, it, r.id) }
+                EndMode.CUSTOM -> r.endActions.map { Actions.runOne(app, it, r.id) }
                 EndMode.NOTHING -> emptyList()
             }
             Snapshot.clear(app, r.id)

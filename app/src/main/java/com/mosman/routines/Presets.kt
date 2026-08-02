@@ -6,6 +6,12 @@ object Presets {
     data class Preset(val subtitle: String, val build: () -> Routine)
 
     val all: List<Preset> = listOf(
+        Preset("An alarm-style reminder every evening at 7") {
+            base("Evening reminder", "alarm",
+                triggers = listOf(Trigger.TimeOfDay(19, 0, (1..7).toSet())),
+                actions = listOf(Action.Remind("Take a moment to plan tomorrow", 10)),
+                endMode = EndMode.NOTHING)
+        },
         Preset("Silence and dim at 10 PM, back to normal at 6:30 AM") {
             base("Bedtime", "bedtime",
                 triggers = listOf(Trigger.TimeOfDay(22, 0, (1..7).toSet())),

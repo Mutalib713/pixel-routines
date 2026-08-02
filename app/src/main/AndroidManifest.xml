@@ -61,6 +61,16 @@
         tools:ignore="ProtectedPermissions" />
 
     <!--
+      Reminders take over the screen like an alarm. Since Android 14 this is auto-granted
+      only to calling/alarm apps, so the app checks canUseFullScreenIntent() and offers the
+      settings toggle rather than silently degrading to a notification you'd scroll past.
+      Vibrate + wake lock are for the alert itself.
+    -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!--
       Android 11+ hides other apps unless they're declared here. Without this the
       "Open an app" list comes back empty and WhatsApp links can't be targeted.
     -->
@@ -148,6 +158,21 @@
             android:exported="true"
             android:excludeFromRecents="true"
             android:theme="@android:style/Theme.NoDisplay" />
+
+        <!--
+          The reminder screen. singleInstance + noHistory so a second reminder replaces the
+          first rather than stacking, and so it never lingers in recents after you answer it.
+        -->
+        <activity
+            android:name=".ReminderActivity"
+            android:exported="false"
+            android:launchMode="singleInstance"
+            android:noHistory="true"
+            android:excludeFromRecents="true"
+            android:showOnLockScreen="true"
+            android:turnScreenOn="true"
+            android:showWhenLocked="true"
+            android:theme="@style/Theme.Routines" />
 
         <!-- Launched when an NFC tag is tapped -->
         <activity

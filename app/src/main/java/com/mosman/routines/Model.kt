@@ -248,7 +248,7 @@ sealed class Condition {
 //  Actions  (the "THEN")
 // ============================================================================
 
-enum class Access { NONE, DND, WRITE_SETTINGS, SECURE_SETTINGS, SHIZUKU, CALL, SMS, NOTIF_ACCESS }
+enum class Access { NONE, DND, WRITE_SETTINGS, SECURE_SETTINGS, SHIZUKU, CALL, SMS, NOTIF_ACCESS, FULL_SCREEN }
 
 sealed class Action {
     abstract fun describe(): String
@@ -395,6 +395,18 @@ sealed class Action {
         override fun toJson() = JSONObject().put("a", "reply").put("text", text)
             .put("pkg", pkg).put("label", label)
     }
+    /**
+     * A reminder you have to deal with. Unlike Notify it takes over the screen the way an
+     * alarm or an incoming call does, so it survives a pocket and a locked phone. Snooze
+     * re-arms it [snoozeMin] minutes later.
+     */
+    data class Remind(val text: String, val snoozeMin: Int = 10) : Action() {
+        override fun icon() = "alarm"
+        override fun describe() = "Remind me: “$text”"
+        override fun access() = Access.FULL_SCREEN
+        override fun toJson() = JSONObject().put("a", "remind")
+            .put("text", text).put("snooze", snoozeMin)
+    }
 
     companion object {
         fun fromJson(o: JSONObject): Action = when (o.getString("a")) {
@@ -422,6 +434,7 @@ sealed class Action {
             "sms" -> SendSms(o.optString("num"), o.optString("who"), o.optString("text"))
             "speak" -> Speak(o.optString("text"))
             "reply" -> ReplyNotification(o.optString("text"), o.optString("pkg"), o.optString("label"))
+            "remind" -> Remind(o.optString("text"), o.optInt("snooze", 10).coerceIn(1, 120))
             else -> Notify("Routine", "")
         }
     }

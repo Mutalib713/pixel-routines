@@ -346,6 +346,9 @@ private fun PermissionArea(routines: List<Routine>, tick: Int, refresh: () -> Un
         routines.any { r -> (r.triggers + r.endTriggers).any { it is Trigger.Location } } &&
             !Permissions.hasBackgroundLocation(ctx)
     }
+    val needFullScreen = remember(tick, routines) {
+        allActions.any { it is Action.Remind } && !Permissions.hasFullScreen(ctx)
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (needDnd) PermCard("Allow Do Not Disturb access",
@@ -359,6 +362,10 @@ private fun PermissionArea(routines: List<Routine>, tick: Int, refresh: () -> Un
         if (needLoc) PermCard("Allow location all the time",
             "Location routines need background access to fire when the app is closed.") {
             ctx.startActivity(Permissions.appDetails(ctx))
+        }
+        if (needFullScreen) PermCard("Allow reminders to take over the screen",
+            "Without this a reminder arrives as a notification you can scroll past.") {
+            ctx.startActivity(Permissions.fullScreenSettings(ctx))
         }
         if (needNotif) PermCard("Allow notifications",
             "Get a confirmation when a routine runs.") {

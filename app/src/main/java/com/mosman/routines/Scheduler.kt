@@ -42,10 +42,23 @@ object Scheduler {
     private fun setAlarm(ctx: Context, r: Routine, index: Int, at: Long) {
         val am = ctx.getSystemService(AlarmManager::class.java)
         val p = pi(ctx, r.id, index)
-        if (am.canScheduleExactAlarms())
-            am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, p)
-        else
+        if (!am.canScheduleExactAlarms()) {
             am.setWindow(AlarmManager.RTC_WAKEUP, at, 10 * 60_000L, p)
+            return
+        }
+        // A routine that reminds you is an alarm in every sense that matters, so it gets
+        // setAlarmClock — the one type Doze never defers, at the cost of the alarm icon in
+        // the status bar. Everything else stays quiet with setExactAndAllowWhileIdle.
+        val reminds = (r.actions + r.endActions).any { it is Action.Remind }
+        if (reminds) {
+            val show = PendingIntent.getActivity(ctx, code(r.id, index) + 1,
+                Intent(ctx, MainActivity::class.java),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            runCatching { am.setAlarmClock(AlarmManager.AlarmClockInfo(at, show), p) }
+                .onFailure { am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, p) }
+        } else {
+            am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, p)
+        }
     }
 
     /** Cancels every possible slot (start 0..7, end 8..15) so nothing is left armed. */
