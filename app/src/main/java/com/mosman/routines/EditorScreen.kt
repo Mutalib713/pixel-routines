@@ -3,6 +3,7 @@
 package com.mosman.routines
 
 import android.content.Context
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -123,6 +124,21 @@ fun EditorScreen(
     var editTrigger by remember { mutableStateOf<TrigEdit?>(null) }
     var editAction by remember { mutableStateOf<ActEdit?>(null) }
     var editCondition by remember { mutableStateOf<Pair<ConditionKind, Int?>?>(null) }
+
+    // A picker sitting on top of the editor has to swallow back itself. Without this the
+    // handler in AppRoot gets it first and closes the whole editor — throwing away the
+    // routine being built — when all that was wanted was to close the picker.
+    val pickerOpen = triggerSheetFor != null || actionSheetFor != null || showConditionSheet ||
+        showIconPicker || editTrigger != null || editAction != null || editCondition != null
+    BackHandler(enabled = pickerOpen) {
+        triggerSheetFor = null
+        actionSheetFor = null
+        showConditionSheet = false
+        showIconPicker = false
+        editTrigger = null
+        editAction = null
+        editCondition = null
+    }
 
     fun result() = initial.copy(
         name = name.ifBlank { "Routine" }, icon = icon, match = match, notifyOnRun = notifyOnRun,
