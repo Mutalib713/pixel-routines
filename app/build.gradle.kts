@@ -15,12 +15,17 @@ android {
         versionName = "1.2"
     }
 
+    val keystoreFile = rootProject.file("routines.keystore")
+    val hasKeystore = keystoreFile.exists()
+
     signingConfigs {
-        create("release") {
-            storeFile = rootProject.file("routines.keystore")
-            storePassword = "routines2026"
-            keyAlias = "routines"
-            keyPassword = "routines2026"
+        if (hasKeystore) {
+            create("release") {
+                storeFile = keystoreFile
+                storePassword = "routines2026"
+                keyAlias = "routines"
+                keyPassword = "routines2026"
+            }
         }
     }
 
@@ -31,7 +36,9 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("release")
+            if (hasKeystore) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 

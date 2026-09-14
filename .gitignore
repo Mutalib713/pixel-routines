@@ -9,9 +9,28 @@ local.properties
 
 # Signing key stays local — regenerate with keytool if lost (see README)
 routines.keystore
+*.keystore
+*.jks
 
 # Outputs
 *.apk
+*.aab
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors and assistants
+.idea/
+.vscode/
+.claude/
+.cursor/
+*.iml
+
+# Environment files
+.env
+.env.*
 
 # Machine-specific truststore for Avast HTTPS scanning (see gradle.properties)
 build-truststore.jks
