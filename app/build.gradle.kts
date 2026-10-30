@@ -50,6 +50,10 @@ android {
     buildFeatures {
         compose = true
     }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 dependencies {
@@ -68,4 +72,7 @@ dependencies {
     // Shizuku: ADB-level shell for the restricted Wi-Fi/Bluetooth/airplane toggles.
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
+
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20250107")
 }

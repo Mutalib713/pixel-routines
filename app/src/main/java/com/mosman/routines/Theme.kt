@@ -7,14 +7,15 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 
+import com.mosman.routines.ui.theme.ThemePreferences
+import com.mosman.routines.ui.theme.PixelRoutinesTheme as ThemedRoot
+
 /**
- * Pixel look: Material You dynamic color pulled from the wallpaper, following the system
- * light/dark setting. minSdk 31 guarantees dynamic color is available.
+ * Pixel look: Supports dynamic colors as well as user-selected Light, Dark, or System mode.
  */
 @Composable
 fun PixelRoutinesTheme(content: @Composable () -> Unit) {
     val ctx = LocalContext.current
-    val scheme =
-        if (isSystemInDarkTheme()) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
-    MaterialTheme(colorScheme = scheme, content = content)
+    val mode = ThemePreferences.getThemeMode(ctx)
+    ThemedRoot(mode = mode, content = content)
 }
