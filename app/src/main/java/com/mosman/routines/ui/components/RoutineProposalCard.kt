@@ -182,22 +182,24 @@ fun RoutineProposalCard(
                 OutlinedButton(
                     onClick = { onReject(draft) },
                     shape = RoundedCornerShape(14.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
                     modifier = Modifier.weight(1f),
                 ) {
                     Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Reject")
+                    Spacer(Modifier.width(4.dp))
+                    Text("Reject", maxLines = 1, fontSize = 13.sp)
                 }
 
                 if (routine != null) {
                     OutlinedButton(
                         onClick = { onEdit(draft) },
                         shape = RoundedCornerShape(14.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
                         modifier = Modifier.weight(1f),
                     ) {
                         Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Edit")
+                        Spacer(Modifier.width(4.dp))
+                        Text("Edit", maxLines = 1, fontSize = 13.sp)
                     }
                 }
 
@@ -205,11 +207,16 @@ fun RoutineProposalCard(
                     onClick = { onApprove(draft) },
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = opColor),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
                     modifier = Modifier.weight(1.2f),
                 ) {
                     Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text(if (draft.operation == DraftOperation.DELETE) "Confirm" else "Save")
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        if (draft.operation == DraftOperation.DELETE) "Confirm" else "Save",
+                        maxLines = 1,
+                        fontSize = 13.sp,
+                    )
                 }
             }
         }
