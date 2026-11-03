@@ -34,10 +34,11 @@ class AlarmReceiver : BroadcastReceiver() {
     }
 }
 
-/** Re-arms all alarms after reboot, app update, or clock changes. */
+/** Re-arms all alarms and trigger services after reboot, app update, or clock changes. */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         Engine.rearmAll(context)
+        com.mosman.routines.volume.VolumePanelStore.syncServices(context)
     }
 }
 

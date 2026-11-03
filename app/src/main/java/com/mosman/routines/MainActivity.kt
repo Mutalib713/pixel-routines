@@ -33,6 +33,8 @@ import com.mosman.routines.ui.home.HomeScreenRedesigned
 import com.mosman.routines.ui.lens.RoutineLensScreen
 import com.mosman.routines.ui.routines.RoutinesScreenRedesigned
 import com.mosman.routines.ui.settings.SettingsScreenRedesigned
+import com.mosman.routines.ui.settings.VolumePanelSettingsScreen
+import com.mosman.routines.volume.VolumePanelStore
 
 sealed interface Screen {
     data object Onboarding : Screen
@@ -42,6 +44,7 @@ sealed interface Screen {
     data object Assistant : Screen
     data object Discover : Screen
     data object Settings : Screen
+    data object VolumePanelTriggers : Screen
     data object Lens : Screen
     data class Edit(val routine: Routine) : Screen
 }
@@ -53,6 +56,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         Engine.rearmAll(this)
+        VolumePanelStore.syncServices(this)
         setContent { PixelRoutinesTheme { AppRoot(tick.intValue) { tick.intValue++ } } }
     }
 
@@ -83,6 +87,7 @@ private fun AppRoot(tick: Int, refresh: () -> Unit) {
     BackHandler(enabled = screen !is Screen.Home && screen !is Screen.Onboarding) {
         screen = when (screen) {
             is Screen.Edit -> Screen.Routines
+            is Screen.VolumePanelTriggers -> Screen.Settings
             is Screen.Discover,
             is Screen.Settings,
             is Screen.Lens,
@@ -204,6 +209,11 @@ private fun AppRoot(tick: Int, refresh: () -> Unit) {
                 is Screen.Settings -> SettingsScreenRedesigned(
                     tick = tick,
                     onBack = { screen = Screen.Home },
+                    onNavigateToVolumeTriggers = { screen = Screen.VolumePanelTriggers },
+                )
+
+                is Screen.VolumePanelTriggers -> VolumePanelSettingsScreen(
+                    onBack = { screen = Screen.Settings },
                 )
 
                 is Screen.Lens -> RoutineLensScreen(

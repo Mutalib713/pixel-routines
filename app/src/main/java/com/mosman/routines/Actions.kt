@@ -153,6 +153,10 @@ object Actions {
                     else sms.sendTextMessage(a.number, null, a.text, null, null)
                     "Texted ${a.who.ifBlank { a.number }}"
                 }
+                is Action.ShowVolumePanel -> {
+                    val shown = com.mosman.routines.volume.VolumePanelController.show(ctx)
+                    if (shown) "Volume panel shown" else "Volume panel skipped (cooldown/screen off)"
+                }
             }
         }.getOrElse { "${a.describe()} — failed" }
     }

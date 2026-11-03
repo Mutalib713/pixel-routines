@@ -14,7 +14,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -32,6 +34,7 @@ import com.mosman.routines.ShizukuBridge
 import com.mosman.routines.Store
 import com.mosman.routines.ui.theme.AppThemeMode
 import com.mosman.routines.ui.theme.ThemePreferences
+import com.mosman.routines.volume.VolumePanelStore
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -39,6 +42,7 @@ import kotlinx.coroutines.launch
 fun SettingsScreenRedesigned(
     tick: Int,
     onBack: () -> Unit,
+    onNavigateToVolumeTriggers: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val ctx = LocalContext.current
@@ -187,6 +191,89 @@ fun SettingsScreenRedesigned(
                                 paused = it
                                 Store.setPaused(ctx, it)
                             },
+                        )
+                    }
+                }
+            }
+
+            // Section: Controls & Gestures
+            item {
+                SettingsSectionHeader("Controls & Gestures")
+                val volumeSettings = remember(tick) { VolumePanelStore.load(ctx) }
+                val activeCount = remember(volumeSettings) {
+                    var count = 0
+                    if (volumeSettings.shakeEnabled) count++
+                    if (volumeSettings.backTapEnabled) count++
+                    if (volumeSettings.swipeEnabled) count++
+                    if (volumeSettings.floatingButtonEnabled) count++
+                    count
+                }
+                Card(
+                    onClick = onNavigateToVolumeTriggers,
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(20.dp)),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primaryContainer),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.VolumeUp,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.size(24.dp),
+                            )
+                        }
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                "Volume Panel Triggers",
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 15.sp,
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                "Open volume controls with gestures or on-screen button",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(
+                                    if (activeCount > 0) MaterialTheme.colorScheme.primaryContainer
+                                    else MaterialTheme.colorScheme.surfaceVariant
+                                )
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                        ) {
+                            Text(
+                                text = if (activeCount > 0) "$activeCount active" else "Off",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (activeCount > 0) MaterialTheme.colorScheme.onPrimaryContainer
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Spacer(Modifier.width(4.dp))
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = "Open",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp),
                         )
                     }
                 }

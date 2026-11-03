@@ -55,7 +55,8 @@ private enum class TriggerKind(val icon: String, val label: String, val sub: Str
     NOTIFICATION("notify", "A notification arrives", "From an app, optionally matching text"),
     CALENDAR("calendar", "Calendar event", "When an event starts or ends"),
     MOTION("car", "Driving / walking", "When you start or stop moving"),
-    GESTURE("screen", "Flip or shake", "Face-down to silence, shake to run"),
+    GESTURE("screen", "Flip, shake, or tap", "Face-down, shake, or double-tap back"),
+    SWIPE("screen", "Swipe gesture", "Swipe inward from a screen edge"),
     APP_OPEN("app", "You open an app", "When an app comes to the front"),
     NFC("nfc", "NFC tag", "Tap a sticker to run this"),
     BATTERY("battery", "Battery level", "Drops below / rises above a %"),
@@ -69,6 +70,7 @@ private enum class TriggerKind(val icon: String, val label: String, val sub: Str
 }
 
 private enum class ActionKind(val icon: String, val label: String, val access: Access) {
+    VOLUME_PANEL("volume", "Show volume panel", Access.NONE),
     REMIND("alarm", "Remind me", Access.FULL_SCREEN),
     RINGER("ringer", "Ringer mode", Access.DND),
     DND("dnd", "Do Not Disturb", Access.DND),
@@ -730,6 +732,26 @@ private fun TriggerConfig(kind: TriggerKind, existing: Trigger?, onDismiss: () -
                     fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+        TriggerKind.SWIPE -> {
+            var dir by remember {
+                mutableStateOf((existing as? Trigger.Swipe)?.direction ?: com.mosman.routines.volume.SwipeDirection.RIGHT)
+            }
+            ConfigDialog("Swipe gesture", onDismiss = onDismiss,
+                onSave = { onSave(Trigger.Swipe(dir)) }) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    com.mosman.routines.volume.SwipeDirection.entries.forEach { d ->
+                        FilterChip(
+                            selected = dir == d,
+                            onClick = { dir = d },
+                            label = { Text(d.label()) },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+                Text("Triggers when swiping inward from the chosen screen edge.",
+                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
         TriggerKind.APP_OPEN -> {
             val ctx = LocalContext.current
             val t = existing as? Trigger.AppOpened
@@ -913,6 +935,16 @@ private fun LocationConfig(existing: Trigger.Location?, onDismiss: () -> Unit, o
 private fun ActionConfig(kind: ActionKind, existing: Action?, onDismiss: () -> Unit,
                          onSave: (Action) -> Unit) {
     when (kind) {
+        ActionKind.VOLUME_PANEL -> {
+            ConfigDialog("Show volume panel", onDismiss = onDismiss,
+                onSave = { onSave(Action.ShowVolumePanel) }) {
+                Text(
+                    "Opens the system volume slider without changing the current volume level.",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
         ActionKind.RINGER -> {
             var mode by remember { mutableStateOf((existing as? Action.Ringer)?.mode ?: RingerMode.SILENT) }
             ConfigDialog("Ringer mode", onDismiss = onDismiss, onSave = { onSave(Action.Ringer(mode)) }) {
@@ -1231,6 +1263,7 @@ private fun kindOf(t: Trigger): TriggerKind = when (t) {
     is Trigger.CalendarEvent -> TriggerKind.CALENDAR
     is Trigger.Motion -> TriggerKind.MOTION
     is Trigger.Gesture -> TriggerKind.GESTURE
+    is Trigger.Swipe -> TriggerKind.SWIPE
     is Trigger.AppOpened -> TriggerKind.APP_OPEN
     is Trigger.NfcTag -> TriggerKind.NFC
     is Trigger.Battery -> TriggerKind.BATTERY
@@ -1244,6 +1277,7 @@ private fun kindOf(t: Trigger): TriggerKind = when (t) {
 }
 
 private fun kindOf(a: Action): ActionKind = when (a) {
+    is Action.ShowVolumePanel -> ActionKind.VOLUME_PANEL
     is Action.Ringer -> ActionKind.RINGER
     is Action.Dnd -> ActionKind.DND
     is Action.Volume -> ActionKind.VOLUME

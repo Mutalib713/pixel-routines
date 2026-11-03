@@ -23,9 +23,10 @@ object Engine {
         routines.forEach { disarm(ctx, it) }
         routines.filter { it.enabled }.forEach { arm(ctx, it) }
 
+        val volSettings = com.mosman.routines.volume.VolumePanelStore.load(ctx)
         val needsService = routines.any { r ->
             r.enabled && (r.triggers.any(::isEventTrigger) || r.endTriggers.any(::isEventTrigger))
-        }
+        } || volSettings.shakeEnabled || volSettings.backTapEnabled
         if (needsService) EventService.start(ctx) else EventService.stop(ctx)
 
         if (routines.any { r -> r.enabled && (r.triggers + r.endTriggers).any { it is Trigger.Location } })

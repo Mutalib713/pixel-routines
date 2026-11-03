@@ -155,7 +155,8 @@ object RoutineDraftValidator {
             is Trigger.Airplane,
             is Trigger.CalendarEvent,
             is Trigger.Motion,
-            is Trigger.Gesture -> {
+            is Trigger.Gesture,
+            is Trigger.Swipe -> {
                 // Structurally sound by definition
             }
         }
@@ -228,7 +229,8 @@ object RoutineDraftValidator {
             is Action.Notify,
             is Action.Media,
             is Action.Speak,
-            is Action.ReplyNotification -> {
+            is Action.ReplyNotification,
+            is Action.ShowVolumePanel -> {
                 // Structurally sound
             }
         }

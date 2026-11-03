@@ -141,11 +141,18 @@ sealed class Trigger {
             .put("type", type.name).put("in", entering)
     }
 
-    /** A physical gesture: phone placed face-down, or shaken. */
+    /** A physical gesture: phone placed face-down, shaken, or back-tapped. */
     data class Gesture(val type: GestureType) : Trigger() {
         override fun icon() = "screen"
         override fun describe() = type.label()
         override fun toJson() = JSONObject().put("t", "gesture").put("type", type.name)
+    }
+
+    /** An edge swipe gesture. */
+    data class Swipe(val direction: com.mosman.routines.volume.SwipeDirection = com.mosman.routines.volume.SwipeDirection.RIGHT) : Trigger() {
+        override fun icon() = "screen"
+        override fun describe() = "Swipe from ${direction.shortLabel()}"
+        override fun toJson() = JSONObject().put("t", "swipe").put("dir", direction.name)
     }
 
     /** An app is brought to the foreground. */
@@ -200,6 +207,9 @@ sealed class Trigger {
                 o.optBoolean("in", true))
             "gesture" -> Gesture(
                 runCatching { GestureType.valueOf(o.getString("type")) }.getOrDefault(GestureType.FLIP_DOWN))
+            "swipe" -> Swipe(
+                runCatching { com.mosman.routines.volume.SwipeDirection.valueOf(o.getString("dir")) }
+                    .getOrDefault(com.mosman.routines.volume.SwipeDirection.RIGHT))
             "appopen" -> AppOpened(o.optString("pkg"), o.optString("label"))
             "nfc" -> NfcTag(o.optString("id"), o.optString("label"))
             else -> Screen(true)
@@ -408,8 +418,17 @@ sealed class Action {
             .put("text", text).put("snooze", snoozeMin)
     }
 
+    /** Opens the system volume panel without changing volume level. */
+    data object ShowVolumePanel : Action() {
+        override fun icon() = "volume"
+        override fun describe() = "Show volume panel"
+        override fun access() = Access.NONE
+        override fun toJson() = JSONObject().put("a", "vol_panel")
+    }
+
     companion object {
         fun fromJson(o: JSONObject): Action = when (o.getString("a")) {
+            "vol_panel" -> ShowVolumePanel
             "ringer" -> Ringer(RingerMode.valueOf(o.getString("mode")))
             "dnd" -> Dnd(o.getBoolean("on"))
             "vol" -> Volume(StreamType.valueOf(o.getString("stream")), o.getInt("pct"))
@@ -462,11 +481,12 @@ enum class MotionType { VEHICLE, WALKING, RUNNING, BICYCLE, STILL;
     }
 }
 
-enum class GestureType { FLIP_DOWN, FLIP_UP, SHAKE;
+enum class GestureType { FLIP_DOWN, FLIP_UP, SHAKE, BACK_TAP;
     fun label() = when (this) {
         FLIP_DOWN -> "Phone placed face-down"
         FLIP_UP -> "Phone turned face-up"
         SHAKE -> "Phone shaken"
+        BACK_TAP -> "Double-tap back"
     }
 }
 

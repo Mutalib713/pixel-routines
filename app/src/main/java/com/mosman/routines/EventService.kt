@@ -23,51 +23,52 @@ class EventService : Service() {
 
     private var lastBattery = -1
 
-    // --- Gestures (flip / shake) ---
+    // --- Gestures (flip / shake / back-tap) ---
     private var sensors: android.hardware.SensorManager? = null
-    private var faceDown = false
-    private var lastShake = 0L
-    private var lastFlip = 0L
+    private val motionDetector = com.mosman.routines.volume.VolumeMotionDetector(
+        onShakeDetected = {
+            val volSettings = com.mosman.routines.volume.VolumePanelStore.load(this@EventService)
+            if (volSettings.shakeEnabled) {
+                com.mosman.routines.volume.VolumePanelController.show(this@EventService)
+            }
+            Engine.handleEvent(this@EventService) {
+                it is Trigger.Gesture && it.type == GestureType.SHAKE
+            }
+        },
+        onBackTapDetected = {
+            val volSettings = com.mosman.routines.volume.VolumePanelStore.load(this@EventService)
+            if (volSettings.backTapEnabled) {
+                com.mosman.routines.volume.VolumePanelController.show(this@EventService)
+            }
+            Engine.handleEvent(this@EventService) {
+                it is Trigger.Gesture && it.type == GestureType.BACK_TAP
+            }
+        },
+        onFlipDetected = { isDown ->
+            Engine.handleEvent(this@EventService) {
+                it is Trigger.Gesture && it.type == if (isDown) GestureType.FLIP_DOWN else GestureType.FLIP_UP
+            }
+        },
+    )
+
     private val sensorListener = object : android.hardware.SensorEventListener {
         override fun onAccuracyChanged(s: android.hardware.Sensor?, a: Int) {}
         override fun onSensorChanged(e: android.hardware.SensorEvent) {
-            val (x, y, z) = Triple(e.values[0], e.values[1], e.values[2])
-            val g = kotlin.math.sqrt(x * x + y * y + z * z)
-            val now = System.currentTimeMillis()
+            val volSettings = com.mosman.routines.volume.VolumePanelStore.load(this@EventService)
+            val triggers = Store.load(this@EventService).filter { it.enabled }.flatMap { it.triggers + it.endTriggers }
+            val hasGestures = triggers.any { it is Trigger.Gesture }
 
-            // Face-down / face-up: gravity on Z flips sign past a comfortable margin.
-            //
-            // values[] is *total* acceleration, so the hand movement of a real flip adds
-            // several m/s² on top of gravity and can cross both margins on the way round —
-            // one physical flip then fires down, up and down again. Only trust the reading
-            // once the phone has settled back to roughly 1g, and leave a gap between
-            // transitions so the wobble after it lands doesn't count as another flip.
-            val settled = kotlin.math.abs(g - 9.81f) < 1.5f
-            if (settled && now - lastFlip > FLIP_GAP_MS) {
-                val nowDown = z < -8.5f
-                val nowUp = z > 8.5f
-                if (nowDown && !faceDown) {
-                    faceDown = true
-                    lastFlip = now
-                    Engine.handleEvent(this@EventService) {
-                        it is Trigger.Gesture && it.type == GestureType.FLIP_DOWN
-                    }
-                } else if (nowUp && faceDown) {
-                    faceDown = false
-                    lastFlip = now
-                    Engine.handleEvent(this@EventService) {
-                        it is Trigger.Gesture && it.type == GestureType.FLIP_UP
-                    }
-                }
-            }
-
-            // Shake: total acceleration well past gravity, debounced.
-            if (g > 26f && now - lastShake > 1500) {
-                lastShake = now
-                Engine.handleEvent(this@EventService) {
-                    it is Trigger.Gesture && it.type == GestureType.SHAKE
-                }
-            }
+            motionDetector.onSensorChanged(
+                x = e.values[0],
+                y = e.values[1],
+                z = e.values[2],
+                shakeSensitivity = volSettings.shakeSensitivity,
+                backTapSensitivity = volSettings.backTapSensitivity,
+                cooldownMs = volSettings.cooldownDurationMs,
+                enableShake = volSettings.shakeEnabled || hasGestures,
+                enableBackTap = volSettings.backTapEnabled || hasGestures,
+                enableFlip = hasGestures,
+            )
         }
     }
 
@@ -191,10 +192,14 @@ class EventService : Service() {
      */
     private fun syncWatchers() {
         val triggers = Store.load(this).filter { it.enabled }.flatMap { it.triggers + it.endTriggers }
+        val volSettings = com.mosman.routines.volume.VolumePanelStore.load(this)
+        val needsMotion = triggers.any { it is Trigger.Gesture } ||
+            volSettings.shakeEnabled || volSettings.backTapEnabled
 
         runCatching { sensors?.unregisterListener(sensorListener) }
         sensors = null
-        if (triggers.any { it is Trigger.Gesture }) {
+        if (needsMotion) {
+            motionDetector.reset()
             sensors = getSystemService(android.hardware.SensorManager::class.java)
             sensors?.getDefaultSensor(android.hardware.Sensor.TYPE_ACCELEROMETER)?.let {
                 sensors?.registerListener(sensorListener, it,

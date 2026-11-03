@@ -82,6 +82,11 @@ object Permissions {
     fun writeSettings(ctx: Context) =
         Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:${ctx.packageName}"))
 
+    fun hasOverlay(ctx: Context) = Settings.canDrawOverlays(ctx)
+
+    fun overlaySettings(ctx: Context) =
+        Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}"))
+
     /** Background location can only be granted from the app's own settings page. */
     fun appDetails(ctx: Context) =
         Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}"))

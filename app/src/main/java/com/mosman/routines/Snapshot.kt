@@ -61,7 +61,7 @@ object Snapshot {
                 is Action.Media, is Action.OpenUrl, is Action.Wait,
                 is Action.Message, is Action.Call, is Action.SendSms,
                 is Action.Speak, is Action.ReplyNotification,
-                is Action.Remind -> null
+                is Action.Remind, is Action.ShowVolumePanel -> null
             }
         }.getOrNull()
     }
