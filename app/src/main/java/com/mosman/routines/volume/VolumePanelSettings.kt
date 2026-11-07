@@ -64,6 +64,21 @@ enum class ButtonSize(val dpSize: Int) {
     }
 }
 
+/** Action triggered by secondary gestures on the floating volume button. */
+enum class FloatingAction {
+    VOLUME_PANEL,
+    VOLUME_UP,
+    VOLUME_DOWN,
+    NONE;
+
+    fun label(): String = when (this) {
+        VOLUME_PANEL -> "Open Volume Panel"
+        VOLUME_UP -> "Volume Up"
+        VOLUME_DOWN -> "Volume Down"
+        NONE -> "Disabled"
+    }
+}
+
 /**
  * Data model for Volume Panel Triggers configuration.
  * All triggers are independent and disabled by default with safe defaults.
@@ -87,11 +102,16 @@ data class VolumePanelSettings(
     val floatingButtonOpacity: Float = 0.85f,
     val floatingButtonX: Int = -1,
     val floatingButtonY: Int = -1,
+    val floatingDoubleTapAction: FloatingAction = FloatingAction.VOLUME_DOWN,
+    val floatingLongPressAction: FloatingAction = FloatingAction.VOLUME_UP,
 
     // General Settings
     val cooldownDurationMs: Long = 1500L,
     val hapticFeedbackEnabled: Boolean = true,
     val screenOnOnly: Boolean = true,
+
+    // Bug Fix: Preserve user's manual Silent & Vibrate mode choices
+    val preserveSilentVibrate: Boolean = true,
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("shakeEnabled", shakeEnabled)
@@ -105,9 +125,12 @@ data class VolumePanelSettings(
         put("floatingButtonOpacity", floatingButtonOpacity.toDouble())
         put("floatingButtonX", floatingButtonX)
         put("floatingButtonY", floatingButtonY)
+        put("floatingDoubleTapAction", floatingDoubleTapAction.name)
+        put("floatingLongPressAction", floatingLongPressAction.name)
         put("cooldownDurationMs", cooldownDurationMs)
         put("hapticFeedbackEnabled", hapticFeedbackEnabled)
         put("screenOnOnly", screenOnOnly)
+        put("preserveSilentVibrate", preserveSilentVibrate)
     }
 
     companion object {
@@ -132,9 +155,16 @@ data class VolumePanelSettings(
                 .coerceIn(0.2f, 1.0f),
             floatingButtonX = json.optInt("floatingButtonX", -1),
             floatingButtonY = json.optInt("floatingButtonY", -1),
+            floatingDoubleTapAction = runCatching {
+                FloatingAction.valueOf(json.optString("floatingDoubleTapAction", FloatingAction.VOLUME_DOWN.name))
+            }.getOrDefault(FloatingAction.VOLUME_DOWN),
+            floatingLongPressAction = runCatching {
+                FloatingAction.valueOf(json.optString("floatingLongPressAction", FloatingAction.VOLUME_UP.name))
+            }.getOrDefault(FloatingAction.VOLUME_UP),
             cooldownDurationMs = json.optLong("cooldownDurationMs", 1500L).coerceIn(500L, 5000L),
             hapticFeedbackEnabled = json.optBoolean("hapticFeedbackEnabled", true),
             screenOnOnly = json.optBoolean("screenOnOnly", true),
+            preserveSilentVibrate = json.optBoolean("preserveSilentVibrate", true),
         )
     }
 }

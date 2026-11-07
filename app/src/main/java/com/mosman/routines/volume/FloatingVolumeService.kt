@@ -101,13 +101,30 @@ class FloatingVolumeService : Service() {
         }
         container.addView(icon)
 
-        // Drag & Click handler
+        // Multi-Gesture handler (Single-tap: Volume Panel, Double-tap: Volume Down, Long-press: Volume Up, Drag)
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+
         container.setOnTouchListener(object : View.OnTouchListener {
             private var initialX = 0
             private var initialY = 0
             private var initialTouchX = 0f
             private var initialTouchY = 0f
-            private var touchStartTime = 0L
+            private var isDragging = false
+            private var hasPerformedLongPress = false
+            private var lastTapTimestamp = 0L
+
+            private val singleTapRunnable = Runnable {
+                VolumePanelController.show(this@FloatingVolumeService)
+            }
+
+            private val longPressRunnable = Runnable {
+                if (!isDragging) {
+                    hasPerformedLongPress = true
+                    container.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+                    val s = VolumePanelStore.load(this@FloatingVolumeService)
+                    VolumePanelController.executeFloatingAction(this@FloatingVolumeService, s.floatingLongPressAction)
+                }
+            }
 
             override fun onTouch(v: View, event: MotionEvent): Boolean {
                 when (event.action) {
@@ -116,39 +133,64 @@ class FloatingVolumeService : Service() {
                         initialY = params.y
                         initialTouchX = event.rawX
                         initialTouchY = event.rawY
-                        touchStartTime = System.currentTimeMillis()
+                        isDragging = false
+                        hasPerformedLongPress = false
                         container.scaleX = 0.92f
                         container.scaleY = 0.92f
+                        handler.postDelayed(longPressRunnable, 450L)
                         return true
                     }
 
                     MotionEvent.ACTION_MOVE -> {
                         val dx = (event.rawX - initialTouchX).toInt()
                         val dy = (event.rawY - initialTouchY).toInt()
-                        params.x = initialX + dx
-                        params.y = initialY + dy
-                        clampPosition(params)
-                        runCatching { windowManager?.updateViewLayout(container, params) }
+                        if (!isDragging && (abs(event.rawX - initialTouchX) > dpToPx(8) || abs(event.rawY - initialTouchY) > dpToPx(8))) {
+                            isDragging = true
+                            handler.removeCallbacks(longPressRunnable)
+                            handler.removeCallbacks(singleTapRunnable)
+                        }
+                        if (isDragging) {
+                            params.x = initialX + dx
+                            params.y = initialY + dy
+                            clampPosition(params)
+                            runCatching { windowManager?.updateViewLayout(container, params) }
+                        }
                         return true
                     }
 
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                         container.scaleX = 1.0f
                         container.scaleY = 1.0f
-                        val diffX = abs(event.rawX - initialTouchX)
-                        val diffY = abs(event.rawY - initialTouchY)
-                        val elapsed = System.currentTimeMillis() - touchStartTime
+                        handler.removeCallbacks(longPressRunnable)
 
-                        if (diffX < dpToPx(8) && diffY < dpToPx(8) && elapsed < 350L) {
-                            // Tap event: Show volume panel
-                            VolumePanelController.show(this@FloatingVolumeService)
-                        } else {
-                            // Drag ended: Save last position
+                        if (hasPerformedLongPress) {
+                            hasPerformedLongPress = false
+                            return true
+                        }
+
+                        if (isDragging) {
+                            isDragging = false
                             clampPosition(params)
                             runCatching { windowManager?.updateViewLayout(container, params) }
                             VolumePanelStore.update(this@FloatingVolumeService) {
                                 it.copy(floatingButtonX = params.x, floatingButtonY = params.y)
                             }
+                            return true
+                        }
+
+                        // Tap event: check for double-tap vs single-tap
+                        val now = System.currentTimeMillis()
+                        val diff = now - lastTapTimestamp
+                        if (diff < 300L) {
+                            // Double tap!
+                            handler.removeCallbacks(singleTapRunnable)
+                            lastTapTimestamp = 0L
+                            val s = VolumePanelStore.load(this@FloatingVolumeService)
+                            VolumePanelController.executeFloatingAction(this@FloatingVolumeService, s.floatingDoubleTapAction)
+                        } else {
+                            // First tap: schedule single tap execution
+                            lastTapTimestamp = now
+                            handler.postDelayed(singleTapRunnable, 300L)
                         }
                         return true
                     }

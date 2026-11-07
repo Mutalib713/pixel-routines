@@ -57,6 +57,18 @@ object Actions {
                     }
                     if ((a.stream == StreamType.RING || a.stream == StreamType.NOTIFICATION) && !dnd)
                         return "${a.stream.label()} volume needs DND access"
+
+                    // If phone is in Vibrate or Silent, changing ring volume > 0 unmutes Android OS.
+                    val currentRinger = am.ringerMode
+                    val isMuted = currentRinger == AudioManager.RINGER_MODE_VIBRATE || currentRinger == AudioManager.RINGER_MODE_SILENT
+                    if (isMuted && (a.stream == StreamType.RING || a.stream == StreamType.NOTIFICATION) && a.percent > 0) {
+                        val preserve = com.mosman.routines.volume.VolumePanelStore.load(ctx).preserveSilentVibrate
+                        if (preserve) {
+                            val modeName = if (currentRinger == AudioManager.RINGER_MODE_VIBRATE) "vibrate" else "silent"
+                            return "${a.stream.label()} volume kept muted (phone in $modeName)"
+                        }
+                    }
+
                     val max = am.getStreamMaxVolume(stream)
                     am.setStreamVolume(stream, (max * a.percent / 100f).roundToInt().coerceIn(0, max), 0)
                     "${a.stream.label()} volume ${a.percent}%"

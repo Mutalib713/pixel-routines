@@ -79,6 +79,45 @@ object VolumePanelController {
     }
 
     /**
+     * Steps the active volume up or down with UI feedback and haptic vibration.
+     *
+     * @param ctx Android Context
+     * @param direction AudioManager.ADJUST_RAISE or AudioManager.ADJUST_LOWER
+     */
+    fun adjustVolume(ctx: Context, direction: Int): Boolean {
+        val appContext = ctx.applicationContext
+        val am = appContext.getSystemService(AudioManager::class.java) ?: return false
+        val dispatched = runCatching {
+            am.adjustSuggestedStreamVolume(
+                direction,
+                AudioManager.USE_DEFAULT_STREAM_TYPE,
+                AudioManager.FLAG_SHOW_UI,
+            )
+            true
+        }.getOrDefault(false)
+
+        if (dispatched) {
+            val settings = VolumePanelStore.load(appContext)
+            if (settings.hapticFeedbackEnabled) {
+                performHaptic(appContext)
+            }
+        }
+        return dispatched
+    }
+
+    /**
+     * Executes the designated floating button action.
+     */
+    fun executeFloatingAction(ctx: Context, action: FloatingAction) {
+        when (action) {
+            FloatingAction.VOLUME_PANEL -> show(ctx, ignoreCooldown = true)
+            FloatingAction.VOLUME_DOWN -> adjustVolume(ctx, AudioManager.ADJUST_LOWER)
+            FloatingAction.VOLUME_UP -> adjustVolume(ctx, AudioManager.ADJUST_RAISE)
+            FloatingAction.NONE -> Unit
+        }
+    }
+
+    /**
      * Checks whether an activation can proceed right now without violating cooldown or screen-on rules.
      */
     fun canTriggerNow(ctx: Context): Boolean {

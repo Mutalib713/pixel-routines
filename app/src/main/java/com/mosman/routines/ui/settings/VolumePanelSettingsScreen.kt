@@ -379,6 +379,54 @@ fun VolumePanelSettingsScreen(
                             modifier = Modifier.fillMaxWidth(),
                         )
 
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+                        // Gestures & Shortcuts Header
+                        Text("Gestures & Actions", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("Single tap", fontSize = 13.sp, modifier = Modifier.weight(1f))
+                            Text(
+                                "Open Volume Panel",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+
+                        // Double-tap Action
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Double tap", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                listOf(FloatingAction.VOLUME_DOWN, FloatingAction.VOLUME_UP, FloatingAction.NONE).forEach { act ->
+                                    FilterChip(
+                                        selected = settings.floatingDoubleTapAction == act,
+                                        onClick = { updateSettings { it.copy(floatingDoubleTapAction = act) } },
+                                        label = { Text(act.label(), fontSize = 11.sp) },
+                                    )
+                                }
+                            }
+                        }
+
+                        // Long-press Action
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Long press", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                listOf(FloatingAction.VOLUME_UP, FloatingAction.VOLUME_DOWN, FloatingAction.NONE).forEach { act ->
+                                    FilterChip(
+                                        selected = settings.floatingLongPressAction == act,
+                                        onClick = { updateSettings { it.copy(floatingLongPressAction = act) } },
+                                        label = { Text(act.label(), fontSize = 11.sp) },
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(Modifier.height(4.dp))
+
                         // Position Reset Action
                         OutlinedButton(
                             onClick = {
@@ -484,6 +532,28 @@ fun VolumePanelSettingsScreen(
                             Switch(
                                 checked = settings.hapticFeedbackEnabled,
                                 onCheckedChange = { updateSettings { s -> s.copy(hapticFeedbackEnabled = it) } },
+                            )
+                        }
+
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+                        // Preserve Silent & Vibrate Toggle (Ringer Guard)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Preserve Silent & Vibrate", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                                Spacer(Modifier.height(2.dp))
+                                Text(
+                                    "Prevent background routines or snapshot restores from un-muting your phone",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Switch(
+                                checked = settings.preserveSilentVibrate,
+                                onCheckedChange = { updateSettings { s -> s.copy(preserveSilentVibrate = it) } },
                             )
                         }
                     }

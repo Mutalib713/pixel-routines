@@ -123,7 +123,22 @@ object Engine {
         val app = ctx.applicationContext
         Thread {
             val results = when (r.endMode) {
-                EndMode.REVERT -> Snapshot.load(app, r.id).map { Actions.runOne(app, it, r.id) }
+                EndMode.REVERT -> {
+                    val loaded = Snapshot.load(app, r.id)
+                    val filtered = if (com.mosman.routines.volume.VolumePanelStore.load(app).preserveSilentVibrate) {
+                        val am = app.getSystemService(AudioManager::class.java)
+                        val currentRinger = am?.ringerMode
+                        val isMuted = currentRinger == AudioManager.RINGER_MODE_VIBRATE || currentRinger == AudioManager.RINGER_MODE_SILENT
+                        loaded.filter { a ->
+                            if (isMuted && a is Action.Ringer && a.mode == RingerMode.SOUND) false
+                            else if (isMuted && a is Action.Volume && (a.stream == StreamType.RING || a.stream == StreamType.NOTIFICATION) && a.percent > 0) false
+                            else true
+                        }
+                    } else {
+                        loaded
+                    }
+                    filtered.map { Actions.runOne(app, it, r.id) }
+                }
                 EndMode.CUSTOM -> r.endActions.map { Actions.runOne(app, it, r.id) }
                 EndMode.NOTHING -> emptyList()
             }
