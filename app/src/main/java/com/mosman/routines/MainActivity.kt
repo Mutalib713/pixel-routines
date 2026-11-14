@@ -170,9 +170,15 @@ private fun AppRoot(tick: Int, refresh: () -> Unit) {
                     onDeleteRoutine = { r -> Store.delete(ctx, r.id); reload() },
                     onOpenCreateOptions = { showCreateOptions = true },
                     onApproveDraft = { d ->
-                        DraftApprovalManager.approve(ctx, d)
+                        val result = DraftApprovalManager.approve(ctx, d)
                         drafts.remove(d)
                         reload()
+                        val msg = when (result) {
+                            is com.mosman.routines.drafts.ApprovalResult.Success -> result.message
+                            is com.mosman.routines.drafts.ApprovalResult.Error -> "Not saved: " + result.errors.joinToString("; ")
+                            is com.mosman.routines.drafts.ApprovalResult.Rejected -> result.reason
+                        }
+                        android.widget.Toast.makeText(ctx, msg, android.widget.Toast.LENGTH_LONG).show()
                     },
                     onRejectDraft = { d ->
                         DraftApprovalManager.reject(d)
@@ -188,9 +194,10 @@ private fun AppRoot(tick: Int, refresh: () -> Unit) {
                 is Screen.Assistant -> AssistantScreenRedesigned(
                     drafts = drafts,
                     onApproveDraft = { d ->
-                        DraftApprovalManager.approve(ctx, d)
+                        val result = DraftApprovalManager.approve(ctx, d)
                         drafts.remove(d)
                         reload()
+                        result
                     },
                     onRejectDraft = { d ->
                         DraftApprovalManager.reject(d)

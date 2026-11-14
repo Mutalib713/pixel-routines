@@ -27,38 +27,36 @@ object DraftApprovalManager {
             return ApprovalResult.Error(validation.errors)
         }
 
+        // Every branch reads the store back before reporting success, so the message describes
+        // what was actually saved, not what was meant to be (PROFILE.md Sacred Rule 4).
         return when (draft.operation) {
-            DraftOperation.CREATE -> {
-                val routine = RoutineDraftMapper.toRoutineToSave(draft)
+            DraftOperation.CREATE, DraftOperation.UPDATE -> {
+                val routine = if (draft.operation == DraftOperation.CREATE) RoutineDraftMapper.toRoutineToSave(draft)
+                    else RoutineDraftMapper.toRoutineToSave(draft, draft.targetRoutineId)
                 Store.upsert(context, routine)
-                ApprovalResult.Success(routine, "Routine “${routine.name}” created successfully.")
+                val stored = Store.get(context, routine.id)
+                    ?: return ApprovalResult.Error(listOf("“${routine.name}” didn't save. Please try again."))
+                val verb = if (draft.operation == DraftOperation.CREATE) "Saved" else "Updated"
+                val state = if (stored.enabled) "It's on and will run: ${stored.ifSummary()}." else "It's saved but paused."
+                ApprovalResult.Success(stored, "$verb “${stored.name}”. $state")
             }
 
-            DraftOperation.UPDATE -> {
-                val routine = RoutineDraftMapper.toRoutineToSave(draft, draft.targetRoutineId)
-                Store.upsert(context, routine)
-                ApprovalResult.Success(routine, "Routine “${routine.name}” updated successfully.")
-            }
-
-            DraftOperation.ENABLE -> {
+            DraftOperation.ENABLE, DraftOperation.DISABLE -> {
                 val id = draft.targetRoutineId ?: return ApprovalResult.Error(listOf("Missing target ID."))
-                Store.setEnabled(context, id, true)
+                val on = draft.operation == DraftOperation.ENABLE
+                Store.setEnabled(context, id, on)
                 val updated = Store.get(context, id)
-                ApprovalResult.Success(updated, "Routine enabled.")
-            }
-
-            DraftOperation.DISABLE -> {
-                val id = draft.targetRoutineId ?: return ApprovalResult.Error(listOf("Missing target ID."))
-                Store.setEnabled(context, id, false)
-                val updated = Store.get(context, id)
-                ApprovalResult.Success(updated, "Routine disabled.")
+                    ?: return ApprovalResult.Error(listOf("That routine no longer exists."))
+                if (updated.enabled != on) return ApprovalResult.Error(listOf("“${updated.name}” didn't change."))
+                ApprovalResult.Success(updated, if (on) "“${updated.name}” is back on." else "“${updated.name}” is paused.")
             }
 
             DraftOperation.DELETE -> {
                 val id = draft.targetRoutineId ?: return ApprovalResult.Error(listOf("Missing target ID."))
                 val name = Store.get(context, id)?.name ?: "Routine"
                 Store.delete(context, id)
-                ApprovalResult.Success(null, "Routine “$name” deleted.")
+                if (Store.get(context, id) != null) return ApprovalResult.Error(listOf("“$name” couldn't be deleted."))
+                ApprovalResult.Success(null, "Deleted “$name”.")
             }
         }
     }

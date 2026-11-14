@@ -38,6 +38,11 @@ object RoutineLensProcessor {
         }
     }
 
+    /** Just the text the on-device reader found in the picture (blank if none). */
+    suspend fun recognizeUri(context: Context, uri: Uri): Result<String> = runCatching {
+        recognizeText(InputImage.fromFilePath(context, uri))
+    }
+
     suspend fun processBitmap(bitmap: Bitmap): Result<RoutineDraft> {
         return try {
             val image = InputImage.fromBitmap(bitmap, 0)

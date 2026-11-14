@@ -37,3 +37,6 @@ build-truststore.jks
 
 # JVM crash logs (Gradle running out of memory)
 hs_err_pid*.log
+
+# Firebase config: not a password, but the repo may go public, so it stays local
+app/google-services.json

@@ -43,11 +43,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import com.mosman.routines.Store
+import com.mosman.routines.drafts.ApprovalResult
 import com.mosman.routines.drafts.RoutineConflictAnalyzer
 import com.mosman.routines.drafts.RoutineDraft
 import com.mosman.routines.ui.components.RoutineProposalCard
 import com.mosman.routines.ui.lens.RoutineLensProcessor
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.UUID
@@ -65,7 +65,7 @@ data class ChatMessage(
 @Composable
 fun AssistantScreenRedesigned(
     drafts: List<RoutineDraft>,
-    onApproveDraft: (RoutineDraft) -> Unit,
+    onApproveDraft: (RoutineDraft) -> ApprovalResult,
     onRejectDraft: (RoutineDraft) -> Unit,
     onEditDraft: (RoutineDraft) -> Unit,
     onOpenLens: () -> Unit,
@@ -162,29 +162,34 @@ fun AssistantScreenRedesigned(
         scope.launch {
             listState.animateScrollToItem(messages.size - 1)
 
-            // If image is attached, extract text with on-device OCR
+            val savedRoutines = Store.load(context)
+
+            // A photo: read its text on the phone and give the parser that text. (Before, the
+            // parser got the Lens's own one-line summary instead, and lost the real timetable.)
             var ocrText: String? = null
+            var ocrProblem: String? = null
             if (imageUri != null) {
-                val ocrResult = RoutineLensProcessor.processImageUri(context, imageUri)
-                ocrResult.onSuccess { draft ->
-                    ocrText = draft.explanation
-                }
+                RoutineLensProcessor.recognizeUri(context, imageUri)
+                    .onSuccess { ocrText = it }
+                    .onFailure { ocrProblem = it.message ?: "the text reader failed" }
             }
 
-            // Parse intent using offline natural language parser
-            val parsed = RoutineAIParser.parse(trimmedText, ocrText)
+            val parsed = when {
+                ocrProblem != null -> ParsedAIResponse("I couldn't read text from that picture ($ocrProblem).", null)
+                imageUri != null && ocrText.isNullOrBlank() ->
+                    ParsedAIResponse("I couldn't find any readable text in that picture. Try a sharper, closer photo.", null)
+                else -> RoutineAIParser.parse(trimmedText, ocrText, savedRoutines)
+            }
 
             // Check conflicts against existing saved routines
-            val savedRoutines = Store.load(context)
             val conflicts = parsed.draft?.proposedRoutine?.let {
                 RoutineConflictAnalyzer.analyze(it, savedRoutines)
             } ?: emptyList()
 
             val finalDraft = parsed.draft?.copy(
-                warnings = conflicts.map { it.message }
+                warnings = parsed.draft.warnings + conflicts.map { it.message }
             )
 
-            delay(400) // Brief natural pause for thinking effect
             isThinking = false
 
             messages.add(
@@ -551,23 +556,29 @@ fun AssistantScreenRedesigned(
                             text = msg.text,
                             draft = msg.draft,
                             onApprove = { draft ->
-                                onApproveDraft(draft)
-                                messages.add(
-                                    ChatMessage(
-                                        isUser = false,
-                                        text = "Done! “${draft.proposedRoutine?.name}” is now active and scheduled.",
-                                    )
-                                )
+                                // Report what the save actually did (PROFILE.md Sacred Rule 4),
+                                // and retire the card so a second tap can't save a duplicate.
+                                val reply = when (val result = onApproveDraft(draft)) {
+                                    is ApprovalResult.Success -> result.message
+                                    is ApprovalResult.Error ->
+                                        "I couldn't save that: " + result.errors.joinToString("; ")
+                                    is ApprovalResult.Rejected -> result.reason
+                                }
+                                val i = messages.indexOfFirst { it.id == msg.id }
+                                if (i >= 0) messages[i] = messages[i].copy(draft = null)
+                                messages.add(ChatMessage(isUser = false, text = reply))
                                 scope.launch {
                                     listState.animateScrollToItem(messages.size - 1)
                                 }
                             },
                             onReject = { draft ->
                                 onRejectDraft(draft)
+                                val i = messages.indexOfFirst { it.id == msg.id }
+                                if (i >= 0) messages[i] = messages[i].copy(draft = null)
                                 messages.add(
                                     ChatMessage(
                                         isUser = false,
-                                        text = "Proposal discarded. Let me know if you would like to adjust the settings.",
+                                        text = "Okay, I've dropped that. Nothing was changed.",
                                     )
                                 )
                                 scope.launch {
