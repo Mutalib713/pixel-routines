@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -448,6 +449,85 @@ fun VolumePanelSettingsScreen(
                 }
             }
 
+            // Unmute WhatsApp statuses
+            item {
+                val hasUsage = remember(tick) { Permissions.hasUsageAccess(ctx) }
+                val shizukuReady = remember(tick) { com.mosman.routines.ShizukuBridge.ready }
+                val shizukuStatus = remember(tick) { com.mosman.routines.ShizukuBridge.status(ctx) }
+                val last = remember(tick, settings) { StatusUnmute.lastResult(ctx) }
+                TriggerCard(
+                    icon = Icons.AutoMirrored.Filled.VolumeOff,
+                    title = "Unmute WhatsApp statuses",
+                    subtitle = "On Vibrate or Silent, WhatsApp plays statuses muted. This presses volume-up for you when one opens.",
+                    badge = "Shizuku",
+                    enabled = settings.statusUnmuteEnabled,
+                    onEnabledChange = { on ->
+                        if (on && !Permissions.hasUsageAccess(ctx)) {
+                            ctx.startActivity(Permissions.usageAccessSettings())
+                        }
+                        updateSettings { it.copy(statusUnmuteEnabled = on) }
+                    },
+                    onTest = {
+                        scope.launch {
+                            val failure = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                com.mosman.routines.ShizukuBridge.pressKeys(
+                                    ctx, android.view.KeyEvent.KEYCODE_VOLUME_UP,
+                                )
+                            }
+                            snackbar.showSnackbar(
+                                // Outside WhatsApp, Android's first press only opens the volume
+                                // panel; it doesn't change the level (seen on the emulator).
+                                failure ?: "Shizuku pressed volume-up. The volume panel should appear."
+                            )
+                        }
+                    },
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        RequirementRow(
+                            label = "Usage access",
+                            status = if (hasUsage) "Allowed" else "Needed to see when a status opens",
+                            ok = hasUsage,
+                            action = if (hasUsage) null else "Allow",
+                            onAction = { ctx.startActivity(Permissions.usageAccessSettings()) },
+                        )
+                        RequirementRow(
+                            label = "Shizuku",
+                            status = shizukuStatus,
+                            ok = shizukuReady,
+                            action = if (shizukuReady) null else "Open",
+                            onAction = {
+                                val sb = com.mosman.routines.ShizukuBridge
+                                if (sb.running && !sb.granted) sb.requestPermission() else sb.openShizuku(ctx)
+                            },
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Keep volume level", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                                Text(
+                                    "Also presses volume-down straight after. Not yet tried on WhatsApp.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Switch(
+                                checked = settings.statusUnmuteKeepLevel,
+                                onCheckedChange = { on -> updateSettings { it.copy(statusUnmuteKeepLevel = on) } },
+                            )
+                        }
+                        if (last != null) {
+                            Text(
+                                "Last: $last",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+
             // Section Header: General Configuration
             item {
                 SettingsSectionHeader("General Preferences")
@@ -636,7 +716,14 @@ private fun TriggerCard(
 
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(title, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        // The title may wrap, but it must leave room for the tag: before, a long
+                        // title squeezed "Shizuku" into one letter-column ("Shi / zu / ku").
+                        Text(
+                            title,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
                         if (badge != null) {
                             Spacer(Modifier.width(6.dp))
                             Box(
@@ -650,6 +737,8 @@ private fun TriggerCard(
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFFCA8A04),
+                                    maxLines = 1,
+                                    softWrap = false,
                                 )
                             }
                         }
@@ -682,6 +771,33 @@ private fun TriggerCard(
                     }
                 }
             }
+        }
+    }
+}
+
+/** One "what this needs" line: name, current state, and a button when something is missing. */
+@Composable
+private fun RequirementRow(
+    label: String,
+    status: String,
+    ok: Boolean,
+    action: String?,
+    onAction: () -> Unit,
+) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            if (ok) Icons.Filled.CheckCircle else Icons.Filled.ErrorOutline,
+            contentDescription = if (ok) "Ready" else "Needs attention",
+            tint = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(label, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Text(status, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (action != null) {
+            TextButton(onClick = onAction) { Text(action, fontSize = 12.sp) }
         }
     }
 }

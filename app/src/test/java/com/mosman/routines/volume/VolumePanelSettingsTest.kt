@@ -25,10 +25,15 @@ class VolumePanelSettingsTest {
             floatingDoubleTapAction = FloatingAction.VOLUME_DOWN,
             floatingLongPressAction = FloatingAction.VOLUME_UP,
             preserveSilentVibrate = true,
+            statusUnmuteEnabled = true,
+            statusUnmuteKeepLevel = true,
         )
 
         val json = original.toJson()
         val parsed = VolumePanelSettings.fromJson(json)
+
+        assertEquals(true, parsed.statusUnmuteEnabled)
+        assertEquals(true, parsed.statusUnmuteKeepLevel)
 
         assertEquals(original.shakeEnabled, parsed.shakeEnabled)
         assertEquals(original.shakeSensitivity, parsed.shakeSensitivity)
@@ -54,5 +59,8 @@ class VolumePanelSettingsTest {
         assertEquals(FloatingAction.VOLUME_DOWN, parsed.floatingDoubleTapAction)
         assertEquals(FloatingAction.VOLUME_UP, parsed.floatingLongPressAction)
         assertTrue(parsed.preserveSilentVibrate)
+        // Settings saved before the WhatsApp feature existed leave it off.
+        assertEquals(false, parsed.statusUnmuteEnabled)
+        assertEquals(false, parsed.statusUnmuteKeepLevel)
     }
 }

@@ -206,6 +206,7 @@ fun SettingsScreenRedesigned(
                     if (volumeSettings.backTapEnabled) count++
                     if (volumeSettings.swipeEnabled) count++
                     if (volumeSettings.floatingButtonEnabled) count++
+                    if (volumeSettings.statusUnmuteEnabled) count++
                     count
                 }
                 Card(

@@ -64,6 +64,20 @@ object ShizukuBridge {
 
     private fun enableOrDisable(on: Boolean) = if (on) "enable" else "disable"
 
+    /**
+     * Presses hardware keys as if the user did, inside whatever app is in front. Android only
+     * lets system-level callers do this (INJECT_EVENTS); Shizuku runs as the ADB shell, which
+     * has it. Used to unmute WhatsApp statuses, which only react to a real key press.
+     * Returns null on success, or a plain-English reason it didn't happen.
+     */
+    fun pressKeys(ctx: Context, vararg keyCodes: Int): String? {
+        if (!installed(ctx)) return "Shizuku isn't installed"
+        if (!running) return "Shizuku isn't running (start it in the Shizuku app)"
+        if (!granted) return "Shizuku hasn't allowed Pixel Routines yet"
+        val cmd = keyCodes.joinToString(" && sleep 0.25 && ") { "input keyevent $it" }
+        return exec(cmd).fold(onSuccess = { null }, onFailure = { "Key press failed (${it.message ?: "shizuku error"})" })
+    }
+
     private fun run(cmd: String, label: String, on: Boolean): String {
         if (!running) return "$label needs Shizuku running"
         if (!granted) return "$label needs Shizuku permission"

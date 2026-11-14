@@ -112,6 +112,11 @@ data class VolumePanelSettings(
 
     // Bug Fix: Preserve user's manual Silent & Vibrate mode choices
     val preserveSilentVibrate: Boolean = true,
+
+    // Unmute WhatsApp statuses (presses volume-up through Shizuku when a status opens muted)
+    val statusUnmuteEnabled: Boolean = false,
+    /** Also press volume-down straight after, so the unmute doesn't nudge the volume up. */
+    val statusUnmuteKeepLevel: Boolean = false,
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("shakeEnabled", shakeEnabled)
@@ -131,6 +136,8 @@ data class VolumePanelSettings(
         put("hapticFeedbackEnabled", hapticFeedbackEnabled)
         put("screenOnOnly", screenOnOnly)
         put("preserveSilentVibrate", preserveSilentVibrate)
+        put("statusUnmuteEnabled", statusUnmuteEnabled)
+        put("statusUnmuteKeepLevel", statusUnmuteKeepLevel)
     }
 
     companion object {
@@ -165,6 +172,8 @@ data class VolumePanelSettings(
             hapticFeedbackEnabled = json.optBoolean("hapticFeedbackEnabled", true),
             screenOnOnly = json.optBoolean("screenOnOnly", true),
             preserveSilentVibrate = json.optBoolean("preserveSilentVibrate", true),
+            statusUnmuteEnabled = json.optBoolean("statusUnmuteEnabled", false),
+            statusUnmuteKeepLevel = json.optBoolean("statusUnmuteKeepLevel", false),
         )
     }
 }

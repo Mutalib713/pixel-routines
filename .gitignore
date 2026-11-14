@@ -34,3 +34,6 @@ desktop.ini
 
 # Machine-specific truststore for Avast HTTPS scanning (see gradle.properties)
 build-truststore.jks
+
+# JVM crash logs (Gradle running out of memory)
+hs_err_pid*.log

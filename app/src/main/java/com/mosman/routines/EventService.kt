@@ -13,6 +13,7 @@ import android.content.IntentFilter
 import android.net.wifi.WifiManager
 import android.os.IBinder
 import androidx.core.content.ContextCompat
+import com.mosman.routines.volume.StatusUnmute
 
 /**
  * A lightweight foreground service that listens for live device events and asks the
@@ -105,6 +106,53 @@ class EventService : Service() {
             events.getNextEvent(e)
             if (e.eventType == android.app.usage.UsageEvents.Event.MOVE_TO_FOREGROUND)
                 latest = e.packageName
+        }
+        latest
+    }.getOrNull()
+
+    // --- Unmute WhatsApp statuses (see volume/StatusUnmute.kt) ---
+    // UsageStats tells us which *screen* (activity class) is in front, not just which app, so
+    // no screen-reading accessibility service is needed. Polls every 1.5 s while the screen is
+    // on, and every 0.4 s while WhatsApp is in front so a status is caught within about a second.
+    private var statusFgPkg: String? = null
+    private var lastStatusResume = 0L
+    private var lastStatusPress = 0L
+    private val statusPoll = object : Runnable {
+        override fun run() {
+            if (State.screenOn(this@EventService)) checkStatusScreen()
+            val fast = StatusUnmute.isWhatsApp(statusFgPkg)
+            handler.postDelayed(this, if (fast) 400L else 1500L)
+        }
+    }
+
+    private fun checkStatusScreen() {
+        val resumed = latestResume() ?: return
+        val (pkg, cls, at) = resumed
+        statusFgPkg = pkg
+        if (!StatusUnmute.isStatusScreen(pkg, cls)) return
+        val ringer = getSystemService(android.media.AudioManager::class.java)?.ringerMode ?: return
+        val now = System.currentTimeMillis()
+        val press = StatusUnmute.shouldPress(pkg, cls, at, lastStatusResume, ringer, now, lastStatusPress)
+        lastStatusResume = maxOf(lastStatusResume, at)   // handled, pressed or not
+        if (!press) return
+        lastStatusPress = now
+        val keepLevel = volSettings.statusUnmuteKeepLevel
+        val what = StatusUnmute.appLabel(pkg)
+        // Shizuku runs a shell process; keep it off the main thread.
+        Thread { StatusUnmute.press(applicationContext, keepLevel, what) }.start()
+    }
+
+    /** Most recent activity brought to the front in the last 10 s: (package, class, time). */
+    private fun latestResume(): Triple<String, String?, Long>? = runCatching {
+        val usage = getSystemService(android.app.usage.UsageStatsManager::class.java)
+        val now = System.currentTimeMillis()
+        val events = usage.queryEvents(now - 10_000, now)
+        var latest: Triple<String, String?, Long>? = null
+        val e = android.app.usage.UsageEvents.Event()
+        while (events.hasNextEvent()) {
+            events.getNextEvent(e)
+            if (e.eventType == android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED)
+                latest = Triple(e.packageName, e.className, e.timeStamp)
         }
         latest
     }.getOrNull()
@@ -224,6 +272,11 @@ class EventService : Service() {
         if (triggers.any { it is Trigger.AppOpened } && Permissions.hasUsageAccess(this)) {
             handler.post(appPoll)
         }
+
+        handler.removeCallbacks(statusPoll)
+        if (vol.statusUnmuteEnabled && Permissions.hasUsageAccess(this)) {
+            handler.post(statusPoll)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -236,6 +289,7 @@ class EventService : Service() {
         runCatching { unregisterReceiver(receiver) }
         runCatching { sensors?.unregisterListener(sensorListener) }
         handler.removeCallbacks(appPoll)
+        handler.removeCallbacks(statusPoll)
         super.onDestroy()
     }
 
