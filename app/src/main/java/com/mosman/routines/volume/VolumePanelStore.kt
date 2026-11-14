@@ -66,6 +66,12 @@ object VolumePanelStore {
         } else {
             SwipeTriggerService.stop(app)
         }
+
+        // The WhatsApp-status watcher only starts if usage access is granted at that moment.
+        // Users grant it in system Settings and come back, which only triggers this resume
+        // path, so nudge EventService to re-check (it re-reads permissions in onStartCommand).
+        // Before this, the watcher stayed off until the app was fully restarted (emulator test).
+        if (settings.statusUnmuteEnabled) com.mosman.routines.EventService.start(app)
     }
 
     /**
