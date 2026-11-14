@@ -10,6 +10,9 @@ import com.mosman.routines.drafts.RoutineDraft
 data class ParsedAIResponse(
     val explanation: String,
     val draft: RoutineDraft?,
+    /** False when the offline assistant couldn't really deal with the message, so the
+     *  online assistant may try (Automatic mode, with consent). */
+    val handled: Boolean = true,
 )
 
 /**
@@ -34,7 +37,7 @@ object RoutineAIParser {
         extractedOcrText: String? = null,
         saved: List<Routine> = emptyList(),
     ): ParsedAIResponse = runCatching { route(userText.trim(), extractedOcrText, saved) }
-        .getOrElse { ParsedAIResponse("Sorry, I couldn't make sense of that one. $EXAMPLES", null) }
+        .getOrElse { ParsedAIResponse("Sorry, I couldn't make sense of that one. $EXAMPLES", null, handled = false) }
 
     private fun route(text: String, ocr: String?, saved: List<Routine>): ParsedAIResponse {
         if (!ocr.isNullOrBlank()) {
@@ -117,7 +120,7 @@ object RoutineAIParser {
             if (already) return ParsedAIResponse(
                 "“${r.name}” is already ${if (r.enabled) "on" else "paused"}.", null)
             return ParsedAIResponse(
-                "Here's the change. Nothing happens until you confirm it.",
+                "Nothing happens until you confirm.",
                 RoutineDraft(
                     draftId = "ai-${System.currentTimeMillis()}",
                     operation = op,
@@ -138,8 +141,9 @@ object RoutineAIParser {
         val r = findRoutine(lower, saved, strict = false)
             ?: return ParsedAIResponse(
                 "Offline, I can only explain the routines you've saved, by name. ${routineList(saved)} " +
-                    "Harder questions need the online assistant, which isn't connected yet.",
+                    "Harder questions need the online assistant.",
                 null,
+                handled = false,
             )
         val extra = if (lower.startsWith("why")) " I can't read the run history from here yet. Check the Activity tab for what actually ran." else ""
         return ParsedAIResponse(describe(r) + extra, null)
@@ -151,7 +155,7 @@ object RoutineAIParser {
         if (!EDIT.containsMatchIn(lower)) return null
         val r = findRoutine(lower, saved, strict = false) ?: return null
         return ParsedAIResponse(
-            "Changing “${r.name}” needs the online assistant, which isn't connected yet. " +
+            "Changing a saved routine isn't something I can do from chat yet. " +
                 "For now, open Routines and tap it to edit it yourself. Right now: ${describe(r)}",
             null,
         )
@@ -287,7 +291,7 @@ object RoutineAIParser {
             ctxStudy -> actions += Action.Dnd(true)
         }
         if (actions.isEmpty()) return ParsedAIResponse(
-            "I couldn't tell what you'd like the phone to do. $EXAMPLES", null)
+            "I couldn't tell what you'd like the phone to do. $EXAMPLES", null, handled = false)
 
         // 4. When
         val range = findRanges(analysis).firstOrNull()
@@ -333,7 +337,8 @@ object RoutineAIParser {
                     questions += "I picked 22:00. Tell me your bedtime if it's different."
                 }
                 else -> return ParsedAIResponse(
-                    "When should this happen? Give me a time like “at 7pm”, or a battery level like “below 20%”.", null)
+                    "When should this happen? Give me a time like “at 7pm”, or a battery level like “below 20%”.", null,
+                    handled = false)
             }
         }
 
@@ -367,7 +372,7 @@ object RoutineAIParser {
             endTriggers = endTriggers,
         )
         return ParsedAIResponse(
-            "Here's what I understood. Check it, then tap Save. Nothing changes until you do.",
+            "Check this, then tap Save. Nothing changes until you do.",
             RoutineDraft(
                 draftId = "ai-${System.currentTimeMillis()}",
                 operation = DraftOperation.CREATE,

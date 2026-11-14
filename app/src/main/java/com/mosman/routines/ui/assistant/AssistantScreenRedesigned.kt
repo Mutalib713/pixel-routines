@@ -43,6 +43,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import com.mosman.routines.Store
+import com.mosman.routines.ai.AssistantMode
+import com.mosman.routines.ai.AssistantPrefs
+import com.mosman.routines.ai.GeminiAssistant
+import com.mosman.routines.ai.GeminiProposalMapper
 import com.mosman.routines.drafts.ApprovalResult
 import com.mosman.routines.drafts.RoutineConflictAnalyzer
 import com.mosman.routines.drafts.RoutineDraft
@@ -59,7 +63,17 @@ data class ChatMessage(
     val imageBitmap: Bitmap? = null,
     val draft: RoutineDraft? = null,
     val timestamp: Long = System.currentTimeMillis(),
+    /** Who answered: shown under assistant messages so it's always clear what left the phone. */
+    val source: String? = null,
 )
+
+const val SOURCE_OFFLINE = "On this phone"
+const val SOURCE_ONLINE = "Gemini · online"
+
+/** The current conversation, held for as long as the app process lives. */
+object ChatSession {
+    val messages = mutableStateListOf<ChatMessage>()
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -81,16 +95,22 @@ fun AssistantScreenRedesigned(
     var cameraTempUri by remember { mutableStateOf<Uri?>(null) }
     var showAttachmentSheet by remember { mutableStateOf(false) }
     var isThinking by remember { mutableStateOf(false) }
-
-    val messages = remember {
-        mutableStateListOf<ChatMessage>()
+    var mode by remember { mutableStateOf(AssistantPrefs.mode(context)) }
+    var showModeMenu by remember { mutableStateOf(false) }
+    // A message waiting for the one-time "send to Gemini?" answer: (text, offline answer, routines).
+    var pendingOnline by remember {
+        mutableStateOf<Triple<String, ParsedAIResponse, List<com.mosman.routines.Routine>>?>(null)
     }
+
+    // Kept outside the screen so the conversation survives switching tabs (not app restarts yet).
+    val messages = ChatSession.messages
 
     val suggestedPrompts = listOf(
         "Silence phone in lectures at KNUST",
         "Bedtime mode at 10:30 PM",
         "Turn on battery saver below 20%",
         "Study focus: Mute phone from 2pm to 5pm",
+        "When I plug in my charger, turn on dark mode",
     )
 
     fun loadBitmap(uri: Uri): Bitmap? {
@@ -143,6 +163,35 @@ fun AssistantScreenRedesigned(
         }
     }
 
+    // Shows an assistant answer, with conflict warnings against saved routines.
+    suspend fun post(parsed: ParsedAIResponse, savedRoutines: List<com.mosman.routines.Routine>, source: String) {
+        val conflicts = parsed.draft?.proposedRoutine?.let {
+            RoutineConflictAnalyzer.analyze(it, savedRoutines)
+        } ?: emptyList()
+        val finalDraft = parsed.draft?.copy(warnings = parsed.draft.warnings + conflicts.map { it.message })
+        messages.add(ChatMessage(isUser = false, text = parsed.explanation, draft = finalDraft, source = source))
+        listState.animateScrollToItem(messages.size - 1)
+    }
+
+    // Gemini through Firebase. On any failure, say why and fall back to the offline answer.
+    suspend fun askGeminiNow(text: String, offline: ParsedAIResponse, savedRoutines: List<com.mosman.routines.Routine>) {
+        isThinking = true
+        val result = runCatching { GeminiAssistant.ask(text, savedRoutines) }
+        isThinking = false
+        result.onSuccess { json ->
+            post(GeminiProposalMapper.map(json, savedRoutines), savedRoutines, SOURCE_ONLINE)
+        }.onFailure { e ->
+            messages.add(ChatMessage(isUser = false,
+                text = "The online assistant isn't reachable right now (${GeminiAssistant.describeError(e)}). Answering on the phone instead:",
+                source = SOURCE_OFFLINE))
+            post(offline, savedRoutines, SOURCE_OFFLINE)
+        }
+    }
+
+    fun askGemini(text: String, offline: ParsedAIResponse, savedRoutines: List<com.mosman.routines.Routine>) {
+        scope.launch { askGeminiNow(text, offline, savedRoutines) }
+    }
+
     fun sendMessage(userText: String, imageUri: Uri?, bitmap: Bitmap?) {
         if (userText.isBlank() && imageUri == null) return
 
@@ -181,27 +230,51 @@ fun AssistantScreenRedesigned(
                 else -> RoutineAIParser.parse(trimmedText, ocrText, savedRoutines)
             }
 
-            // Check conflicts against existing saved routines
-            val conflicts = parsed.draft?.proposedRoutine?.let {
-                RoutineConflictAnalyzer.analyze(it, savedRoutines)
-            } ?: emptyList()
-
-            val finalDraft = parsed.draft?.copy(
-                warnings = parsed.draft.warnings + conflicts.map { it.message }
-            )
-
-            isThinking = false
-
-            messages.add(
-                ChatMessage(
-                    isUser = false,
-                    text = parsed.explanation,
-                    draft = finalDraft,
-                )
-            )
-
-            listState.animateScrollToItem(messages.size - 1)
+            val goOnline = AssistantPrefs.wantsOnline(mode, parsed.handled, hasPhoto = imageUri != null)
+            when {
+                !goOnline -> {
+                    isThinking = false
+                    post(parsed, savedRoutines, SOURCE_OFFLINE)
+                }
+                AssistantPrefs.hasConsent(context) -> askGemini(trimmedText, parsed, savedRoutines)
+                else -> {
+                    // First time a message would leave the phone: ask (the dialog below).
+                    isThinking = false
+                    pendingOnline = Triple(trimmedText, parsed, savedRoutines)
+                }
+            }
         }
+    }
+
+
+    // One-time consent before anything leaves the phone (PROFILE.md Sacred Rule 6).
+    pendingOnline?.let { (text, offline, saved) ->
+        AlertDialog(
+            onDismissRequest = { },
+            title = { Text("Send this to Gemini?") },
+            text = {
+                Text(
+                    "The phone can't handle this one by itself. To answer, your message and the names of " +
+                        "your routines go to Google's Gemini. On the free plan, Google may use them to improve " +
+                        "its products and people may read them. Photos and routine details stay on your phone.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    AssistantPrefs.setConsent(context, true)
+                    pendingOnline = null
+                    askGemini(text, offline, saved)
+                }) { Text("Allow") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    pendingOnline = null
+                    mode = AssistantMode.OFFLINE_ONLY
+                    AssistantPrefs.setMode(context, AssistantMode.OFFLINE_ONLY)
+                    scope.launch { post(offline, saved, SOURCE_OFFLINE) }
+                }) { Text("Keep it offline") }
+            },
+        )
     }
 
     Scaffold(
@@ -226,12 +299,36 @@ fun AssistantScreenRedesigned(
                         Spacer(Modifier.width(10.dp))
                         Column {
                             Text("Routine AI", fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                            Text(
-                                "Local Intelligence · Offline",
-                                fontSize = 11.sp,
-                                color = Color(0xFF10B981),
-                                fontWeight = FontWeight.Medium,
-                            )
+                            Box {
+                                Text(
+                                    "${mode.label()} ▾",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .clickable { showModeMenu = true }
+                                        .padding(vertical = 2.dp),
+                                )
+                                DropdownMenu(expanded = showModeMenu, onDismissRequest = { showModeMenu = false }) {
+                                    AssistantMode.entries.forEach { m ->
+                                        DropdownMenuItem(
+                                            text = {
+                                                Column {
+                                                    Text(m.label(), fontWeight = if (m == mode) FontWeight.Bold else FontWeight.Normal)
+                                                    Text(m.detail(), fontSize = 11.sp,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                }
+                                            },
+                                            onClick = {
+                                                mode = m
+                                                AssistantPrefs.setMode(context, m)
+                                                showModeMenu = false
+                                            },
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 },
@@ -554,6 +651,7 @@ fun AssistantScreenRedesigned(
                     } else {
                         AssistantBubble(
                             text = msg.text,
+                            source = msg.source,
                             draft = msg.draft,
                             onApprove = { draft ->
                                 // Report what the save actually did (PROFILE.md Sacred Rule 4),
@@ -681,6 +779,7 @@ private fun UserBubble(text: String, bitmap: Bitmap?) {
 @Composable
 private fun AssistantBubble(
     text: String,
+    source: String?,
     draft: RoutineDraft?,
     onApprove: (RoutineDraft) -> Unit,
     onReject: (RoutineDraft) -> Unit,
@@ -722,6 +821,14 @@ private fun AssistantBubble(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 14.sp,
                     lineHeight = 20.sp,
+                )
+            }
+            if (source != null) {
+                Text(
+                    source,
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.outline,
+                    modifier = Modifier.padding(start = 6.dp, top = 3.dp),
                 )
             }
 
