@@ -1,6 +1,8 @@
 plugins {
     id("com.android.application") // AGP 9: Kotlin support is built in
     id("org.jetbrains.kotlin.plugin.compose")
+    // Reads app/google-services.json (git-ignored) so Firebase knows which project to talk to.
+    id("com.google.gms.google-services")
 }
 
 android {
@@ -77,6 +79,14 @@ dependencies {
     // not the Play-services one: that downloads its model on first use, so the first scan
     // could fail offline. Same com.google.mlkit.vision.text API.
     implementation("com.google.mlkit:text-recognition:16.0.1")
+
+    // Routine AI online: Gemini through Firebase AI Logic, guarded by App Check.
+    // The BoM keeps all Firebase library versions in step.
+    implementation(platform("com.google.firebase:firebase-bom:35.2.0"))
+    implementation("com.google.firebase:firebase-ai")
+    // App Check: debug provider in debug builds only, Play Integrity in release builds.
+    debugImplementation("com.google.firebase:firebase-appcheck-debug")
+    releaseImplementation("com.google.firebase:firebase-appcheck-playintegrity")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20250107")
