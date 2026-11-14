@@ -61,13 +61,16 @@ class SwipeTriggerService : Service() {
     @SuppressLint("ClickableViewAccessibility")
     private fun addEdgeZone(dir: SwipeDirection) {
         val wm = windowManager ?: return
-        val dm = resources.displayMetrics
         val isSideEdge = dir == SwipeDirection.LEFT || dir == SwipeDirection.RIGHT
         val thickness = dpToPx(24)
+        // Fixed lengths, not a fraction of the screen: a Service's displayMetrics can still
+        // hold the sideways size from an app that just rotated (measured on a Pixel 6 Pro:
+        // a 180dp strip came out 144dp tall).
+        val length = dpToPx(if (isSideEdge) 180 else 160)
 
         val params = WindowManager.LayoutParams(
-            if (isSideEdge) thickness else (dm.widthPixels * 0.40f).toInt(),
-            if (isSideEdge) minOf(dpToPx(180), (dm.heightPixels * 0.35f).toInt()) else thickness,
+            if (isSideEdge) thickness else length,
+            if (isSideEdge) length else thickness,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,

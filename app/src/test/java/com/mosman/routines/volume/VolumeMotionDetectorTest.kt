@@ -129,6 +129,22 @@ class VolumeMotionDetectorTest {
     }
 
     @Test
+    fun shakingTheHeldPhone_isNotABackTap() {
+        // Phone upright, shaken side to side, with the front-to-back wobble a real wrist adds.
+        var taps = 0
+        val d = VolumeMotionDetector(onShakeDetected = {}, onBackTapDetected = { taps++ })
+        var t = 0L
+        while (t < 4000L) {
+            val on = t in 1000L until 3000L
+            val sx = if (on) 18f * kotlin.math.sin(2 * Math.PI * 4 * t / 1000.0).toFloat() else 0f
+            val wobble = if (on) 6f * kotlin.math.sin(2 * Math.PI * 9 * t / 1000.0).toFloat() else 0f
+            d.onSensorChanged(sx, 9.81f, wobble, now = t, enableFlip = false)
+            t += 20L
+        }
+        assertEquals(0, taps)
+    }
+
+    @Test
     fun doubleTapBack_triggersWhenTwoSpikesOccurInWindow() {
         // Baseline
         for (i in 0..5) {

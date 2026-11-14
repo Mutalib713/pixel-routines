@@ -35,6 +35,7 @@ class VolumeMotionDetector(
     private var lastFilteredZ = Float.NaN
     private var firstTapTime = -1L
     private var lastBackTapTrigger = -100_000L
+    private var lastLateralMotion = -100_000L
 
     // ---- Flip detection state ----
     private var faceDown = false
@@ -158,7 +159,17 @@ class VolumeMotionDetector(
             // Guard: Don't treat a violent whole-phone shake as a gentle back-tap
             val isViolentShake = abs(totalG - 9.81f) > 12.0f
 
-            if (!isViolentShake && zSpike > tapThresh && (now - lastBackTapTrigger > cooldownMs)) {
+            // A knock on the back pushes the phone front-to-back (Z). Shaking or handling it
+            // moves it sideways too, and the wobble that comes with that produced Z spikes:
+            // on a Pixel 6 Pro, 4 "back-taps" fired during a 3-shake test. So ignore spikes
+            // while, and shortly after, the phone is moving sideways.
+            val lateral = maxOf(abs(linX), abs(linY))
+            if (lateral > LATERAL_MOTION_MS2) lastLateralMotion = now
+            val handling = now - lastLateralMotion < LATERAL_QUIET_MS
+            val zDominant = abs(linZ) > lateral * 1.5f
+
+            if (!isViolentShake && !handling && zDominant && zSpike > tapThresh &&
+                (now - lastBackTapTrigger > cooldownMs)) {
                 if (firstTapTime == -1L) {
                     firstTapTime = now
                 } else {
@@ -189,5 +200,11 @@ class VolumeMotionDetector(
         /** Gravity filter time constant: slow enough to ignore a 2–6 Hz shake, fast enough to
          *  follow the phone being turned over within about a second. */
         const val GRAVITY_TAU_MS = 400f
+
+        /** Sideways movement (m/s², gravity removed) that counts as "being handled". */
+        const val LATERAL_MOTION_MS2 = 4f
+
+        /** How long after sideways movement a Z spike is still not trusted as a knock. */
+        const val LATERAL_QUIET_MS = 600L
     }
 }
