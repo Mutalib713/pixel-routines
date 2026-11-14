@@ -55,13 +55,15 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        Engine.rearmAll(this)
-        VolumePanelStore.syncServices(this)
+        Engine.rearmAll(this)   // also syncs the floating button / swipe overlays
         setContent { PixelRoutinesTheme { AppRoot(tick.intValue) { tick.intValue++ } } }
     }
 
     override fun onResume() {
         super.onResume()
+        // Coming back from the "Display over other apps" page: start (or stop) the overlays now
+        // instead of waiting for the next cold start.
+        VolumePanelStore.syncOverlays(this)
         tick.intValue++
     }
 }
@@ -213,6 +215,7 @@ private fun AppRoot(tick: Int, refresh: () -> Unit) {
                 )
 
                 is Screen.VolumePanelTriggers -> VolumePanelSettingsScreen(
+                    tick = tick,
                     onBack = { screen = Screen.Settings },
                 )
 

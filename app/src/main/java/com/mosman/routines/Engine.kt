@@ -33,6 +33,9 @@ object Engine {
             Geofences.syncAll(ctx)
 
         Motion.sync(ctx)   // subscribes/unsubscribes driving & walking detection
+
+        // Floating button + edge-swipe zones (a routine may have just gained a swipe trigger).
+        com.mosman.routines.volume.VolumePanelStore.syncOverlays(ctx)
     }
 
     fun arm(ctx: Context, r: Routine) {

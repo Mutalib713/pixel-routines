@@ -87,12 +87,17 @@ object VolumePanelController {
     fun adjustVolume(ctx: Context, direction: Int): Boolean {
         val appContext = ctx.applicationContext
         val am = appContext.getSystemService(AudioManager::class.java) ?: return false
+        // Not adjustSuggestedStreamVolume: when nothing is playing, AudioService swallows the
+        // first "suggested" adjustment and only opens the panel (it treats it like the first
+        // press of a hardware volume key), so a single double-tap/long-press changed nothing.
+        // Adjusting a named stream skips that suppression. Media is what the Pixel volume
+        // panel shows by default; during a call, adjust the call instead.
+        val stream = when (am.mode) {
+            AudioManager.MODE_IN_CALL, AudioManager.MODE_IN_COMMUNICATION -> AudioManager.STREAM_VOICE_CALL
+            else -> AudioManager.STREAM_MUSIC
+        }
         val dispatched = runCatching {
-            am.adjustSuggestedStreamVolume(
-                direction,
-                AudioManager.USE_DEFAULT_STREAM_TYPE,
-                AudioManager.FLAG_SHOW_UI,
-            )
+            am.adjustStreamVolume(stream, direction, AudioManager.FLAG_SHOW_UI)
             true
         }.getOrDefault(false)
 

@@ -25,9 +25,17 @@ class EventService : Service() {
 
     // --- Gestures (flip / shake / back-tap) ---
     private var sensors: android.hardware.SensorManager? = null
+    // What the sensor callback needs, cached by syncWatchers(). The callback runs up to 50 times
+    // a second; it used to re-read and re-parse every routine plus the volume settings from
+    // storage on each reading. syncWatchers runs on every service start, and Engine.rearmAll
+    // restarts the service whenever routines or volume settings change, so this stays current.
+    @Volatile private var volSettings = com.mosman.routines.volume.VolumePanelSettings()
+    @Volatile private var wantShake = false
+    @Volatile private var wantBackTap = false
+    @Volatile private var wantFlip = false
+
     private val motionDetector = com.mosman.routines.volume.VolumeMotionDetector(
         onShakeDetected = {
-            val volSettings = com.mosman.routines.volume.VolumePanelStore.load(this@EventService)
             if (volSettings.shakeEnabled) {
                 com.mosman.routines.volume.VolumePanelController.show(this@EventService)
             }
@@ -36,7 +44,6 @@ class EventService : Service() {
             }
         },
         onBackTapDetected = {
-            val volSettings = com.mosman.routines.volume.VolumePanelStore.load(this@EventService)
             if (volSettings.backTapEnabled) {
                 com.mosman.routines.volume.VolumePanelController.show(this@EventService)
             }
@@ -54,20 +61,17 @@ class EventService : Service() {
     private val sensorListener = object : android.hardware.SensorEventListener {
         override fun onAccuracyChanged(s: android.hardware.Sensor?, a: Int) {}
         override fun onSensorChanged(e: android.hardware.SensorEvent) {
-            val volSettings = com.mosman.routines.volume.VolumePanelStore.load(this@EventService)
-            val triggers = Store.load(this@EventService).filter { it.enabled }.flatMap { it.triggers + it.endTriggers }
-            val hasGestures = triggers.any { it is Trigger.Gesture }
-
+            val s = volSettings
             motionDetector.onSensorChanged(
                 x = e.values[0],
                 y = e.values[1],
                 z = e.values[2],
-                shakeSensitivity = volSettings.shakeSensitivity,
-                backTapSensitivity = volSettings.backTapSensitivity,
-                cooldownMs = volSettings.cooldownDurationMs,
-                enableShake = volSettings.shakeEnabled || hasGestures,
-                enableBackTap = volSettings.backTapEnabled || hasGestures,
-                enableFlip = hasGestures,
+                shakeSensitivity = s.shakeSensitivity,
+                backTapSensitivity = s.backTapSensitivity,
+                cooldownMs = s.cooldownDurationMs,
+                enableShake = wantShake,
+                enableBackTap = wantBackTap,
+                enableFlip = wantFlip,
             )
         }
     }
@@ -192,18 +196,27 @@ class EventService : Service() {
      */
     private fun syncWatchers() {
         val triggers = Store.load(this).filter { it.enabled }.flatMap { it.triggers + it.endTriggers }
-        val volSettings = com.mosman.routines.volume.VolumePanelStore.load(this)
-        val needsMotion = triggers.any { it is Trigger.Gesture } ||
-            volSettings.shakeEnabled || volSettings.backTapEnabled
+        val gestures = triggers.filterIsInstance<Trigger.Gesture>().map { it.type }.toSet()
+        val vol = com.mosman.routines.volume.VolumePanelStore.load(this)
+        volSettings = vol
+        // Each detector runs only if something actually uses it (a back-tap detector running
+        // for a flip-only routine was just a source of false fires).
+        wantShake = vol.shakeEnabled || GestureType.SHAKE in gestures
+        wantBackTap = vol.backTapEnabled || GestureType.BACK_TAP in gestures
+        wantFlip = GestureType.FLIP_DOWN in gestures || GestureType.FLIP_UP in gestures
 
         runCatching { sensors?.unregisterListener(sensorListener) }
         sensors = null
-        if (needsMotion) {
+        if (wantShake || wantBackTap || wantFlip) {
             motionDetector.reset()
             sensors = getSystemService(android.hardware.SensorManager::class.java)
+            // A knuckle tap lasts only a few milliseconds. At SENSOR_DELAY_UI (~15 readings a
+            // second) most taps fell between readings, so back-tap gets ~50 a second (GAME).
+            // Shake and flip are slow movements and keep the cheaper rate.
+            val rate = if (wantBackTap) android.hardware.SensorManager.SENSOR_DELAY_GAME
+                else android.hardware.SensorManager.SENSOR_DELAY_UI
             sensors?.getDefaultSensor(android.hardware.Sensor.TYPE_ACCELEROMETER)?.let {
-                sensors?.registerListener(sensorListener, it,
-                    android.hardware.SensorManager.SENSOR_DELAY_UI)
+                sensors?.registerListener(sensorListener, it, rate)
             }
         }
 

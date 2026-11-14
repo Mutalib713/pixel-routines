@@ -60,6 +60,74 @@ class VolumeMotionDetectorTest {
         assertEquals(1, shakeCount)
     }
 
+    /**
+     * Feeds [seconds] of readings every [stepMs] ms with gravity [g] (x, y, z), plus a
+     * side-to-side shake on X of [amp] m/s² at 4 Hz between 1 s and 3 s. Returns shakes seen.
+     */
+    private fun shakeIn(
+        g: Triple<Float, Float, Float>,
+        sensitivity: Sensitivity,
+        amp: Float = 18f,
+        shaking: Boolean = true,
+        stepMs: Long = 20L,
+        seconds: Int = 4,
+    ): Int {
+        var count = 0
+        val d = VolumeMotionDetector(onShakeDetected = { count++ }, onBackTapDetected = {})
+        var t = 0L
+        while (t < seconds * 1000L) {
+            val shake = if (shaking && t in 1000L until 3000L)
+                amp * kotlin.math.sin(2 * Math.PI * 4 * t / 1000.0).toFloat() else 0f
+            d.onSensorChanged(g.first + shake, g.second, g.third, now = t,
+                shakeSensitivity = sensitivity, enableBackTap = false, enableFlip = false)
+            t += stepMs
+        }
+        return count
+    }
+
+    private val flatUp = Triple(0f, 0f, 9.81f)
+    private val upright = Triple(0f, 9.81f, 0f)
+    private val faceDown = Triple(0f, 0f, -9.81f)
+
+    @Test
+    fun shake_isDetected_inEveryOrientation() {
+        for (g in listOf(flatUp, upright, faceDown)) {
+            for (s in listOf(Sensitivity.MEDIUM, Sensitivity.HIGH)) {
+                assert(shakeIn(g, s) >= 1) { "no shake detected for gravity=$g sensitivity=$s" }
+            }
+        }
+    }
+
+    @Test
+    fun shake_isDetected_atTheSlowSensorRateToo() {
+        // SENSOR_DELAY_UI on a Pixel delivers a reading roughly every 66 ms.
+        assert(shakeIn(upright, Sensitivity.MEDIUM, stepMs = 66L) >= 1)
+    }
+
+    @Test
+    fun phoneHeldStill_neverShakes_evenOnHighSensitivity() {
+        // The old detector treated gravity on Y (phone upright) as "already moving" on High.
+        for (g in listOf(flatUp, upright, faceDown)) {
+            assertEquals(0, shakeIn(g, Sensitivity.HIGH, shaking = false))
+        }
+    }
+
+    @Test
+    fun turningThePhoneOver_isNotAShake() {
+        var count = 0
+        val d = VolumeMotionDetector(onShakeDetected = { count++ }, onBackTapDetected = {})
+        var t = 0L
+        // Upright for a second, rotate to flat over 300 ms, then rest.
+        while (t <= 3000L) {
+            val p = ((t - 1000L).coerceIn(0L, 300L)) / 300.0
+            val y = (9.81 * kotlin.math.cos(p * Math.PI / 2)).toFloat()
+            val z = (9.81 * kotlin.math.sin(p * Math.PI / 2)).toFloat()
+            d.onSensorChanged(0f, y, z, now = t, enableBackTap = false, enableFlip = false)
+            t += 20L
+        }
+        assertEquals(0, count)
+    }
+
     @Test
     fun doubleTapBack_triggersWhenTwoSpikesOccurInWindow() {
         // Baseline

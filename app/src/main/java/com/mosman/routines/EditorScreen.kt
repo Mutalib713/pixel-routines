@@ -750,6 +750,14 @@ private fun TriggerConfig(kind: TriggerKind, existing: Trigger?, onDismiss: () -
                 }
                 Text("Triggers when swiping inward from the chosen screen edge.",
                     fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                val swipeCtx = LocalContext.current
+                if (!Permissions.hasOverlay(swipeCtx)) {
+                    Text("Needs \"Display over other apps\" to draw the edge strip.",
+                        fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
+                    TextButton(onClick = { swipeCtx.startActivity(Permissions.overlaySettings(swipeCtx)) }) {
+                        Text("Allow")
+                    }
+                }
             }
         }
         TriggerKind.APP_OPEN -> {

@@ -31,6 +31,7 @@ import kotlin.math.roundToInt
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VolumePanelSettingsScreen(
+    tick: Int,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -40,6 +41,9 @@ fun VolumePanelSettingsScreen(
 
     var settings by remember { mutableStateOf(VolumePanelStore.load(ctx)) }
     var hasOverlay by remember { mutableStateOf(Permissions.hasOverlay(ctx)) }
+    // tick bumps on every resume, so the warning card clears as soon as the user comes back
+    // from granting "Display over other apps".
+    LaunchedEffect(tick) { hasOverlay = Permissions.hasOverlay(ctx) }
 
     fun updateSettings(transform: (VolumePanelSettings) -> VolumePanelSettings) {
         val updated = transform(settings)
@@ -300,7 +304,7 @@ fun VolumePanelSettingsScreen(
                             }
                         }
                         Text(
-                            "A subtle edge zone listens for inward swipes without interfering with center screen touch or standard back gestures.",
+                            "A thin strip on that edge listens for an inward swipe. On the left and right edges, Back still works above and below the strip.",
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

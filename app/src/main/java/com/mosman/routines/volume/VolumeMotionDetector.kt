@@ -20,9 +20,16 @@ class VolumeMotionDetector(
     private var firstShakeAxis = 0 // 0 = X, 1 = Y, 2 = Z
     private var firstShakeSign = 0 // +1 or -1
     private var lastShakeTrigger = -100_000L
-    private var lastAccelX = 0f
-    private var lastAccelY = 0f
-    private var lastAccelZ = 0f
+
+    // ---- Gravity estimate (slow low-pass filter of the raw reading) ----
+    // The accelerometer always includes gravity, on whichever axis points down. Shake used to
+    // assume the phone lay flat face-up (gravity on +Z only), so held upright or face-down it
+    // either never fired or locked onto gravity itself. Subtracting this estimate leaves only
+    // the hand's movement, whatever the orientation.
+    private var gravX = 0f
+    private var gravY = 0f
+    private var gravZ = 0f
+    private var lastSampleTime = 0L
 
     // ---- Back-tap detection state ----
     private var lastFilteredZ = Float.NaN
@@ -48,13 +55,25 @@ class VolumeMotionDetector(
         // Initialize filtered Z on first sample
         if (lastFilteredZ.isNaN()) {
             lastFilteredZ = z
-            lastAccelX = x
-            lastAccelY = y
-            lastAccelZ = z
+            gravX = x
+            gravY = y
+            gravZ = z
+            lastSampleTime = now
             return
         }
 
         val totalG = sqrt(x * x + y * y + z * z)
+
+        // Time-based low-pass, so it behaves the same at 15 or 50 samples per second.
+        val dt = (now - lastSampleTime).coerceIn(1L, 200L).toFloat()
+        lastSampleTime = now
+        val alpha = GRAVITY_TAU_MS / (GRAVITY_TAU_MS + dt)
+        gravX = alpha * gravX + (1 - alpha) * x
+        gravY = alpha * gravY + (1 - alpha) * y
+        gravZ = alpha * gravZ + (1 - alpha) * z
+        val linX = x - gravX
+        val linY = y - gravY
+        val linZ = z - gravZ
 
         // 1. Flip Detection (settled near 1g gravity)
         if (enableFlip && onFlipDetected != null) {
@@ -78,17 +97,16 @@ class VolumeMotionDetector(
         if (enableShake) {
             val shakeThresh = shakeSensitivity.shakeThreshold()
 
-            // Find dominant movement axis
-            val netZ = z - 9.81f
+            // Find dominant movement axis (gravity removed)
             val axis = when {
-                abs(x) >= abs(y) && abs(x) >= abs(netZ) -> 0
-                abs(y) >= abs(x) && abs(y) >= abs(netZ) -> 1
+                abs(linX) >= abs(linY) && abs(linX) >= abs(linZ) -> 0
+                abs(linY) >= abs(linX) && abs(linY) >= abs(linZ) -> 1
                 else -> 2
             }
             val primaryVal = when (axis) {
-                0 -> x
-                1 -> y
-                else -> netZ
+                0 -> linX
+                1 -> linY
+                else -> linZ
             }
 
             if (now - lastShakeTrigger > cooldownMs) {
@@ -102,9 +120,9 @@ class VolumeMotionDetector(
                 } else if (shakeMoveCount == 1) {
                     val gap = now - firstShakeTime
                     val currentValOnFirstAxis = when (firstShakeAxis) {
-                        0 -> x
-                        1 -> y
-                        else -> netZ
+                        0 -> linX
+                        1 -> linY
+                        else -> linZ
                     }
                     // Deliberate reversal: moving opposite to the first direction
                     val reversed = (currentValOnFirstAxis * firstShakeSign) < -(shakeThresh * 0.7f)
@@ -158,15 +176,18 @@ class VolumeMotionDetector(
             }
         }
 
-        lastAccelX = x
-        lastAccelY = y
-        lastAccelZ = z
     }
 
     fun reset() {
         shakeMoveCount = 0
         firstShakeTime = 0L
         firstTapTime = -1L
-        lastFilteredZ = Float.NaN
+        lastFilteredZ = Float.NaN   // also makes the next sample re-seed the gravity estimate
+    }
+
+    private companion object {
+        /** Gravity filter time constant: slow enough to ignore a 2–6 Hz shake, fast enough to
+         *  follow the phone being turned over within about a second. */
+        const val GRAVITY_TAU_MS = 400f
     }
 }
