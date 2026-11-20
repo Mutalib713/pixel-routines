@@ -23,6 +23,15 @@ import kotlin.coroutines.resumeWithException
  * (Antigravity's version made a routine from any text at all, filling in 08:00–17:00 when the
  * picture had no times; a random photo on the Pixel produced a routine, 2026-11-20.)
  */
+/** An attachment ready to send to Gemini: exactly one of [bitmap], [pdfBytes], [text] is set. */
+class Attachment(
+    val name: String,
+    val kind: RoutineLensProcessor.Kind,
+    val bitmap: Bitmap? = null,
+    val pdfBytes: ByteArray? = null,
+    val text: String? = null,
+)
+
 object RoutineLensProcessor {
 
     /** PDFs: read at most this many pages, so a long document can't stall the phone. */
@@ -56,6 +65,44 @@ object RoutineLensProcessor {
             Kind.UNSUPPORTED -> throw IllegalArgumentException("that kind of file isn't supported. Use a photo, an image, a PDF or a text file")
         }
     }
+
+    /**
+     * The attachment as it would go to Gemini, only after the user said yes for this one file:
+     * an image shrunk to at most 1600 px on its long side (plenty for a timetable, small on mobile
+     * data), a PDF as its own bytes (Gemini reads PDFs directly; capped at 15 MB), or a text file's text.
+     */
+    suspend fun loadForGemini(context: Context, uri: Uri): Attachment = withContext(Dispatchers.IO) {
+        val name = displayName(context, uri)
+        when (kindOf(context, uri)) {
+            Kind.IMAGE -> {
+                val src = android.graphics.ImageDecoder.createSource(context.contentResolver, uri)
+                val bmp = android.graphics.ImageDecoder.decodeBitmap(src) { d, info, _ ->
+                    val longSide = maxOf(info.size.width, info.size.height)
+                    if (longSide > 1600) {
+                        val f = 1600f / longSide
+                        d.setTargetSize((info.size.width * f).toInt(), (info.size.height * f).toInt())
+                    }
+                    d.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
+                }
+                Attachment(name, Kind.IMAGE, bitmap = bmp)
+            }
+            Kind.PDF -> {
+                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    ?: throw IllegalStateException("couldn't open the PDF")
+                if (bytes.size > 15 * 1024 * 1024) throw IllegalArgumentException("that PDF is over 15 MB, too big to send")
+                Attachment(name, Kind.PDF, pdfBytes = bytes)
+            }
+            Kind.TEXT -> Attachment(name, Kind.TEXT, text = context.contentResolver.openInputStream(uri)
+                ?.bufferedReader()?.use { it.readText().take(20_000) }.orEmpty())
+            Kind.UNSUPPORTED -> throw IllegalArgumentException("that kind of file isn't supported")
+        }
+    }
+
+    fun displayName(context: Context, uri: Uri): String = runCatching {
+        context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+            if (c.moveToFirst()) c.getString(0) else null
+        }
+    }.getOrNull() ?: uri.lastPathSegment ?: "file"
 
     private suspend fun readPdf(context: Context, uri: Uri): String {
         val pages = withContext(Dispatchers.IO) {

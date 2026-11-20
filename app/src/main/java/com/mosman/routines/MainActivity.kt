@@ -132,7 +132,9 @@ private fun AppRoot(tick: Int, refresh: () -> Unit) {
             }
         },
     ) { pad ->
-        Box(Modifier.fillMaxSize().padding(pad)) {
+        // consumeWindowInsets: screens inside already have the status bar and tabs accounted for,
+        // so their own imePadding() lifts the composer only by what the keyboard adds.
+        Box(Modifier.fillMaxSize().padding(pad).consumeWindowInsets(pad)) {
             when (val s = screen) {
                 is Screen.Onboarding -> Onboarding(tick) { screen = Screen.Home }
 

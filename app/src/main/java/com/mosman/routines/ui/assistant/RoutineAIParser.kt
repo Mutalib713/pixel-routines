@@ -13,6 +13,8 @@ data class ParsedAIResponse(
     /** False when the offline assistant couldn't really deal with the message, so the
      *  online assistant may try (Automatic mode, with consent). */
     val handled: Boolean = true,
+    /** More proposals from the same answer (a big timetable can need two Lecture Mode routines). */
+    val extraDrafts: List<RoutineDraft> = emptyList(),
 )
 
 /**

@@ -165,6 +165,30 @@ object GeminiProposalMapper {
         return ParsedAIResponse(PROPOSAL_INTRO, draft)
     }
 
+    /**
+     * Gemini's answer about an attachment: a timetable becomes Lecture Mode (every class checked
+     * on the phone first), one routine goes through the same path as a typed request, and
+     * "nothing here" is shown as Gemini's short description.
+     */
+    fun mapAttachment(json: String?, saved: List<Routine>): ParsedAIResponse {
+        val o = runCatching { JSONObject(json ?: "") }.getOrNull()
+            ?: return ParsedAIResponse("The online assistant sent an answer I couldn't read, so I didn't use it.", null)
+        val reply = o.optString("reply").trim().take(MAX_REPLY)
+        return when (o.optString("kind").uppercase()) {
+            "TIMETABLE" -> {
+                val (slots, dropped) = LectureMode.parseClasses(o)
+                if (slots.isEmpty()) return ParsedAIResponse(
+                    "It looked like a timetable, but I couldn't read any class with a clear day and time from it.", null)
+                val (msg, drafts) = LectureMode.drafts(slots, dropped)
+                if (drafts.isEmpty()) ParsedAIResponse("I read the classes but couldn't build a routine that passes the app's checks.", null)
+                else ParsedAIResponse(msg, drafts.first(), extraDrafts = drafts.drop(1))
+            }
+            "ROUTINE" -> map(JSONObject().put("operation", "CREATE").put("reply", reply)
+                .put("routine", o.optJSONObject("routine")).toString(), saved)
+            else -> ParsedAIResponse(reply.ifBlank { "I didn't find a time or schedule in it." }, null)
+        }
+    }
+
     /** Shown above every Gemini proposal instead of Gemini's own sentence. */
     const val PROPOSAL_INTRO = "Check this, then tap Save. Nothing changes until you do."
 }

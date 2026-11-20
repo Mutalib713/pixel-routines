@@ -93,6 +93,28 @@ class GeminiProposalMapperTest {
         assertNull(GeminiProposalMapper.map(null, emptyList()).draft)
     }
 
+    @Test fun attachedTimetable_becomesLectureMode() {
+        val json = """{"reply":"A weekly timetable.","kind":"TIMETABLE","classes":[
+            {"course":"BIT 261","day":2,"start":"15:00","end":"16:55"},
+            {"course":"BIT 297","day":2,"start":"17:00","end":"18:55"},
+            {"course":"???","day":12,"start":"25:00","end":"26:00"}]}"""
+        val r = GeminiProposalMapper.mapAttachment(json, emptyList())
+        val routine = r.draft!!.proposedRoutine!!
+        assertEquals("Lecture Mode", routine.name)
+        // back-to-back: one stretch 14:55 -> 18:55 on Tuesday
+        assertEquals(listOf<Trigger>(Trigger.TimeOfDay(14, 55, setOf(2))), routine.triggers)
+        assertEquals(listOf<Trigger>(Trigger.TimeOfDay(18, 55, setOf(2))), routine.endTriggers)
+        assertTrue(r.draft!!.questions.any { it.contains("didn't make sense") })
+        assertFalse(r.explanation.contains("A weekly timetable")) // our wording, not Gemini's
+    }
+
+    @Test fun attachedPhotoWithNothing_isSaidPlainly() {
+        val r = GeminiProposalMapper.mapAttachment(
+            """{"reply":"This is a photo of a laptop screen with chat text; there is no schedule.","kind":"NONE"}""", emptyList())
+        assertNull(r.draft)
+        assertTrue(r.explanation.contains("no schedule"))
+    }
+
     @Test fun offlineOnly_neverGoesOnline() {
         assertFalse(AssistantPrefs.wantsOnline(AssistantMode.OFFLINE_ONLY, offlineHandled = false, hasPhoto = false))
     }

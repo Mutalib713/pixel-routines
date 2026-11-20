@@ -263,7 +263,7 @@ fun RoutineLensScreen(
             // Detected Routine Proposal
             if (detectedDraft != null && !isProcessing) {
                 Text(
-                    text = "Here's the routine I found",
+                    text = "A routine from this picture",
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp,
                     color = MaterialTheme.colorScheme.primary,
