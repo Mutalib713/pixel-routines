@@ -26,7 +26,8 @@ object Engine {
         val volSettings = com.mosman.routines.volume.VolumePanelStore.load(ctx)
         val needsService = routines.any { r ->
             r.enabled && (r.triggers.any(::isEventTrigger) || r.endTriggers.any(::isEventTrigger))
-        } || volSettings.shakeEnabled || volSettings.backTapEnabled || volSettings.statusUnmuteEnabled
+        } || volSettings.shakeEnabled || volSettings.backTapEnabled || volSettings.flipEnabled ||
+            volSettings.statusUnmuteEnabled
         if (needsService) EventService.start(ctx) else EventService.stop(ctx)
 
         if (routines.any { r -> r.enabled && (r.triggers + r.endTriggers).any { it is Trigger.Location } })
@@ -65,7 +66,10 @@ object Engine {
         val r = Store.get(ctx, id)
         if (r == null || !r.enabled) { onComplete?.invoke(); return }
         val isEnd = index >= END_OFFSET
-        if (isEnd) endRoutine(ctx, r, onComplete) else fireRoutine(ctx, r, onComplete)
+        // An end time only ends a routine that actually started. Before, it ran regardless, so
+        // a routine whose start was skipped (condition not met, paused) still ran its end actions.
+        if (isEnd && !Store.isActive(ctx, r.id)) onComplete?.invoke()
+        else if (isEnd) endRoutine(ctx, r, onComplete) else fireRoutine(ctx, r, onComplete)
         // Re-arm this recurring trigger for its next occurrence.
         val list = if (isEnd) r.endTriggers else r.triggers
         when (val t = list.getOrNull(if (isEnd) index - END_OFFSET else index)) {
@@ -82,7 +86,9 @@ object Engine {
         val list = if (index >= END_OFFSET) r?.endTriggers else r?.triggers
         val t = list?.getOrNull(if (index >= END_OFFSET) index - END_OFFSET else index) as? Trigger.Location
         if (r == null || !r.enabled || t == null || t.enter != enter) { onComplete?.invoke(); return }
-        if (index >= END_OFFSET) endRoutine(ctx, r, onComplete) else fireRoutine(ctx, r, onComplete)
+        if (index >= END_OFFSET) {
+            if (Store.isActive(ctx, r.id)) endRoutine(ctx, r, onComplete) else onComplete?.invoke()
+        } else fireRoutine(ctx, r, onComplete)
     }
 
     /** Live device events from EventService. */
@@ -110,10 +116,13 @@ object Engine {
         // Mark it running before the work starts, not after: actions can take seconds (Wait
         // sleeps for up to 30), and an end trigger that lands mid-run still has to find the
         // routine active or it will be ignored.
+        val wasRunning = r.hasEnd && Store.isActive(app, r.id)
         if (r.hasEnd) Store.setActive(app, r.id, true)
         Thread {
-            // Remember the "before" state so the end condition can put it back.
-            if (r.hasEnd && r.endMode == EndMode.REVERT)
+            // Remember the "before" state so the end condition can put it back. Only on the
+            // first start: firing again while running would capture the routine's OWN changes
+            // (Vibrate), and the end would then "restore" Vibrate instead of Sound.
+            if (r.hasEnd && r.endMode == EndMode.REVERT && !wasRunning)
                 Snapshot.save(app, r.id, Snapshot.capture(app, r))
             val results = Actions.runAll(app, r)
             RunLog.add(app, r, "ran", results)
@@ -126,27 +135,31 @@ object Engine {
     /** Ends a running routine: undo, run end actions, or leave things alone. */
     fun endRoutine(ctx: Context, r: Routine, onComplete: (() -> Unit)? = null) {
         val app = ctx.applicationContext
-        Thread {
-            val results = when (r.endMode) {
-                EndMode.REVERT -> {
-                    val am = app.getSystemService(AudioManager::class.java)
-                    val current = when (am?.ringerMode) {
-                        AudioManager.RINGER_MODE_VIBRATE -> RingerMode.VIBRATE
-                        AudioManager.RINGER_MODE_SILENT -> RingerMode.SILENT
-                        else -> RingerMode.SOUND
-                    }
-                    RevertFilter.filter(
-                        snapshot = Snapshot.load(app, r.id),
-                        routineActions = r.actions,
-                        currentRinger = current,
-                        preserveSilentVibrate = com.mosman.routines.volume.VolumePanelStore.load(app).preserveSilentVibrate,
-                    ).map { Actions.runOne(app, it, r.id) }
+        // Decide what to undo now, on the caller's thread, and mark it stopped straight away.
+        // Switching a routine off or deleting it calls this and then clears its data; reading
+        // inside the thread raced with that and could find the snapshot already gone.
+        val toRun: List<Action> = when (r.endMode) {
+            EndMode.REVERT -> {
+                val am = app.getSystemService(AudioManager::class.java)
+                val current = when (am?.ringerMode) {
+                    AudioManager.RINGER_MODE_VIBRATE -> RingerMode.VIBRATE
+                    AudioManager.RINGER_MODE_SILENT -> RingerMode.SILENT
+                    else -> RingerMode.SOUND
                 }
-                EndMode.CUSTOM -> r.endActions.map { Actions.runOne(app, it, r.id) }
-                EndMode.NOTHING -> emptyList()
+                RevertFilter.filter(
+                    snapshot = Snapshot.load(app, r.id),
+                    routineActions = r.actions,
+                    currentRinger = current,
+                    preserveSilentVibrate = com.mosman.routines.volume.VolumePanelStore.load(app).preserveSilentVibrate,
+                )
             }
-            Snapshot.clear(app, r.id)
-            Store.setActive(app, r.id, false)
+            EndMode.CUSTOM -> r.endActions
+            EndMode.NOTHING -> emptyList()
+        }
+        Snapshot.clear(app, r.id)
+        Store.setActive(app, r.id, false)
+        Thread {
+            val results = toRun.map { Actions.runOne(app, it, r.id) }
             RunLog.add(app, r, "ended", results.ifEmpty { listOf("left as is") })
             if (results.isNotEmpty() && r.notifyOnRun) Actions.notifyEnded(app, r, results)
             RoutinesWidget.refresh(app)
@@ -157,11 +170,13 @@ object Engine {
     /** Manual "Run now" — skips trigger/condition/pause checks; callback lands on the caller's thread pool. */
     fun runNow(ctx: Context, r: Routine, onDone: (List<String>) -> Unit) {
         val app = ctx.applicationContext
+        val wasRunning = r.hasEnd && Store.isActive(app, r.id)
+        if (r.hasEnd) Store.setActive(app, r.id, true)
         Thread {
-            if (r.hasEnd && r.endMode == EndMode.REVERT)
+            // Same rule as fireRoutine: a second Run now keeps the first "before" snapshot.
+            if (r.hasEnd && r.endMode == EndMode.REVERT && !wasRunning)
                 Snapshot.save(app, r.id, Snapshot.capture(app, r))
             val out = Actions.runAll(app, r)
-            if (r.hasEnd) Store.setActive(app, r.id, true)
             RunLog.add(app, r, "ran (manual)", out)
             RoutinesWidget.refresh(app)
             onDone(out)

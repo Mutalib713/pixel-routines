@@ -36,7 +36,14 @@ class AlarmReceiver : BroadcastReceiver() {
 
 /** Re-arms all alarms and trigger services after reboot, app update, or clock changes. */
 class BootReceiver : BroadcastReceiver() {
+    private val handled = setOf(
+        Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED,
+        Intent.ACTION_TIME_CHANGED, Intent.ACTION_TIMEZONE_CHANGED,
+    )
+
     override fun onReceive(context: Context, intent: Intent) {
+        // The receiver is exported (it has to be, for boot), so ignore anything else sent to it.
+        if (intent.action !in handled) return
         Engine.rearmAll(context)   // includes the floating button / swipe overlays
     }
 }

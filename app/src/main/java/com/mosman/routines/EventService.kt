@@ -168,6 +168,9 @@ class EventService : Service() {
                 Intent.ACTION_POWER_DISCONNECTED ->
                     Engine.handleEvent(ctx) { it is Trigger.Power && !it.connected }
                 Intent.ACTION_HEADSET_PLUG -> {
+                    // Sticky: Android replays the last plug state the moment we register, so a
+                    // service restart looked like "headphones unplugged" and fired routines.
+                    if (isInitialStickyBroadcast) return
                     val plugged = intent.getIntExtra("state", 0) == 1
                     Engine.handleEvent(ctx) { it is Trigger.Headset && it.connected == plugged }
                 }
@@ -182,7 +185,7 @@ class EventService : Service() {
                 Intent.ACTION_BATTERY_CHANGED -> onBattery(ctx, intent)
                 BluetoothDevice.ACTION_ACL_CONNECTED -> onBt(ctx, intent, true)
                 BluetoothDevice.ACTION_ACL_DISCONNECTED -> onBt(ctx, intent, false)
-                WifiManager.NETWORK_STATE_CHANGED_ACTION -> onWifi(ctx)
+                WifiManager.NETWORK_STATE_CHANGED_ACTION -> onWifi(ctx, initial = isInitialStickyBroadcast)
             }
         }
     }
@@ -213,12 +216,25 @@ class EventService : Service() {
         }
     }
 
-    private fun onWifi(ctx: Context) {
+    // Last known network: null = not connected. Wi-Fi sends this broadcast several times per
+    // connection (connecting, authenticating, connected...), so routines used to fire again on
+    // each one. Now only a real change counts. "Leave network X" also never fired before: by the
+    // time the broadcast arrives the name is gone, so it's matched against the previous name.
+    @Volatile private var lastSsid: String? = null
+    @Volatile private var wifiKnown = false
+
+    private fun onWifi(ctx: Context, initial: Boolean) {
         val ssid = Permissions.currentSsid(ctx)
-        val connected = ssid != null
-        Engine.handleEvent(ctx) { t ->
-            t is Trigger.Wifi && t.connected == connected &&
-                (t.ssid == null || t.ssid.equals(ssid, ignoreCase = true))
+        val prev = lastSsid
+        val first = !wifiKnown
+        lastSsid = ssid
+        wifiKnown = true
+        if (initial || first || prev == ssid) return
+        if (prev != null) Engine.handleEvent(ctx) { t ->
+            t is Trigger.Wifi && !t.connected && (t.ssid == null || t.ssid.equals(prev, ignoreCase = true))
+        }
+        if (ssid != null) Engine.handleEvent(ctx) { t ->
+            t is Trigger.Wifi && t.connected && (t.ssid == null || t.ssid.equals(ssid, ignoreCase = true))
         }
     }
 

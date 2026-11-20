@@ -26,6 +26,9 @@ object Permissions {
         Build.VERSION.SDK_INT < 33 ||
             ctx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
+    fun granted(ctx: Context, permission: String) =
+        ctx.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
+
     fun hasFineLocation(ctx: Context) =
         ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
 

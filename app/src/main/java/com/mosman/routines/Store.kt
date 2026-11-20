@@ -28,6 +28,7 @@ object Store {
 
     fun get(ctx: Context, id: Long): Routine? = load(ctx).firstOrNull { it.id == id }
 
+    @Synchronized
     fun upsert(ctx: Context, r: Routine) {
         val list = load(ctx).filter { it.id != r.id } + r
         save(ctx, list.sortedBy { it.name.lowercase() })
@@ -36,7 +37,11 @@ object Store {
     }
 
     fun delete(ctx: Context, id: Long) {
-        get(ctx, id)?.let { Engine.disarm(ctx, it) }
+        get(ctx, id)?.let {
+            // Deleting a routine mid-run used to leave its changes in place for good.
+            if (isActive(ctx, id)) Engine.endRoutine(ctx, it)
+            Engine.disarm(ctx, it)
+        }
         save(ctx, load(ctx).filter { it.id != id })
         Snapshot.clear(ctx, id)
         setActive(ctx, id, false)
@@ -45,7 +50,12 @@ object Store {
     }
 
     fun setEnabled(ctx: Context, id: Long, enabled: Boolean) {
-        get(ctx, id)?.let { upsert(ctx, it.copy(enabled = enabled)) }
+        get(ctx, id)?.let {
+            // Switching off a running routine (Lecture Mode mid-class) ends it and puts the
+            // settings back. Before, it stayed on Vibrate and its end alarm was ignored.
+            if (!enabled && isActive(ctx, id)) Engine.endRoutine(ctx, it)
+            upsert(ctx, it.copy(enabled = enabled))
+        }
     }
 
     // ---- Which routines are currently "running" (fired, waiting for their end) ----
@@ -56,6 +66,7 @@ object Store {
 
     fun isActive(ctx: Context, id: Long) = activeIds(ctx).contains(id)
 
+    @Synchronized
     fun setActive(ctx: Context, id: Long, active: Boolean) {
         val now = activeIds(ctx).toMutableSet()
         if (active) now.add(id) else now.remove(id)

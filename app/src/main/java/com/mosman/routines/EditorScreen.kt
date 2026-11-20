@@ -675,18 +675,41 @@ private fun TriggerConfig(kind: TriggerKind, existing: Trigger?, onDismiss: () -
             val t = existing as? Trigger.Bluetooth
             var on by remember { mutableStateOf(t?.connected ?: true) }
             var dev by remember { mutableStateOf(t?.deviceName ?: "") }
+            // Reading a device's name needs "Nearby devices". Nothing asked for it before, so a
+            // trigger for a named device could never match.
+            val ctx = LocalContext.current
+            val perm = android.Manifest.permission.BLUETOOTH_CONNECT
+            var granted by remember { mutableStateOf(Permissions.granted(ctx, perm)) }
+            val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted = it }
             ConfigDialog("Bluetooth device", onDismiss = onDismiss,
-                onSave = { onSave(Trigger.Bluetooth(on, dev.ifBlank { null })) }) {
+                onSave = {
+                    if (dev.isNotBlank() && !granted) ask.launch(perm)
+                    onSave(Trigger.Bluetooth(on, dev.ifBlank { null }))
+                }) {
                 OnOff("When a device", on, { on = it }, "Connects", "Disconnects")
                 InputField("Device name (blank = any)", dev) { dev = it }
+                if (dev.isNotBlank() && !granted) Text(
+                    "To tell devices apart by name, the app will ask for “Nearby devices” when you save.",
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         TriggerKind.WIFI -> {
             val t = existing as? Trigger.Wifi
             var on by remember { mutableStateOf(t?.connected ?: true) }
             var ssid by remember { mutableStateOf(t?.ssid ?: "") }
+            // Android only reveals the network name to apps with location access.
+            val ctx = LocalContext.current
+            val perm = android.Manifest.permission.ACCESS_FINE_LOCATION
+            var granted by remember { mutableStateOf(Permissions.granted(ctx, perm)) }
+            val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted = it }
             ConfigDialog("Wi-Fi network", onDismiss = onDismiss,
-                onSave = { onSave(Trigger.Wifi(on, ssid.ifBlank { null })) }) {
+                onSave = {
+                    if (ssid.isNotBlank() && !granted) ask.launch(perm)
+                    onSave(Trigger.Wifi(on, ssid.ifBlank { null }))
+                }) {
+                if (ssid.isNotBlank() && !granted) Text(
+                    "Android only shows network names to apps with location access, so the app will ask when you save.",
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 OnOff("When Wi-Fi", on, { on = it }, "Connects", "Disconnects")
                 InputField("Network name / SSID (blank = any)", ssid) { ssid = it }
             }
