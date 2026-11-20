@@ -260,7 +260,9 @@ private fun QuickAction(icon: ImageVector, label: String, modifier: Modifier, on
         ) {
             Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(Sp.xs))
-            Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            // Centred: "From a picture" wraps to two lines and sat left-aligned on the Pixel.
+            Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         }
     }
 }
