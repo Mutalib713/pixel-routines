@@ -186,6 +186,28 @@ sealed class Trigger {
             .put("off", offsetMin).put("lat", lat).put("lng", lng).put("place", place)
     }
 
+    /**
+     * One of the five daily prayers at a place, calculated on the phone (PrayerCalc), with an
+     * offset: negative = before, positive = after. Added 2026-11-20.
+     */
+    data class Prayer(val prayer: com.mosman.routines.Prayer, val offsetMin: Int,
+                      val lat: Double, val lng: Double, val place: String,
+                      val method: PrayerMethod = PrayerMethod.MWL,
+                      val school: AsrSchool = AsrSchool.SHAFII) : Trigger() {
+        override fun icon() = "prayer"
+        override fun describe(): String {
+            val off = when {
+                offsetMin == 0 -> "At ${prayer.label()}"
+                offsetMin < 0 -> "${-offsetMin} min before ${prayer.label()}"
+                else -> "${offsetMin} min after ${prayer.label()}"
+            }
+            return "$off ($place)"
+        }
+        override fun toJson() = JSONObject().put("t", "prayer").put("p", prayer.name)
+            .put("off", offsetMin).put("lat", lat).put("lng", lng).put("place", place)
+            .put("method", method.name).put("school", school.name)
+    }
+
     companion object {
         fun fromJson(o: JSONObject): Trigger = when (o.getString("t")) {
             "time" -> TimeOfDay(o.getInt("h"), o.getInt("m"), o.getJSONArray("days").toIntSet())
@@ -200,6 +222,12 @@ sealed class Trigger {
             "air" -> Airplane(o.getBoolean("on"))
             "sun" -> Sun(o.getBoolean("rise"), o.optInt("off", 0),
                 o.getDouble("lat"), o.getDouble("lng"), o.optString("place", "here"))
+            "prayer" -> Prayer(
+                runCatching { com.mosman.routines.Prayer.valueOf(o.getString("p")) }.getOrDefault(com.mosman.routines.Prayer.DHUHR),
+                o.optInt("off", 0), o.getDouble("lat"), o.getDouble("lng"), o.optString("place", "here"),
+                runCatching { PrayerMethod.valueOf(o.optString("method")) }.getOrDefault(PrayerMethod.MWL),
+                runCatching { AsrSchool.valueOf(o.optString("school")) }.getOrDefault(AsrSchool.SHAFII),
+            )
             "notif" -> NotificationFrom(o.optString("pkg"), o.optString("label"), o.optString("contains"))
             "cal" -> CalendarEvent(o.optString("title"), o.optBoolean("start", true))
             "motion" -> Motion(

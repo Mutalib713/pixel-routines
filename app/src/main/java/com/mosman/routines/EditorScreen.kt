@@ -53,6 +53,7 @@ enum class EditorMode(val label: String) {
 private enum class TriggerKind(val icon: String, val label: String, val sub: String) {
     TIME("schedule", "Time of day", "At a set time on chosen days"),
     SUN("sunny", "Sunrise / sunset", "Follows the sun, with an offset"),
+    PRAYER("prayer", "Prayer time", "Fajr, Dhuhr, Asr, Maghrib or Isha, worked out on the phone"),
     NOTIFICATION("notify", "A notification arrives", "From an app, optionally matching text"),
     CALENDAR("calendar", "Calendar event", "When an event starts or ends"),
     MOTION("car", "Driving / walking", "When you start or stop moving"),
@@ -692,6 +693,7 @@ private fun TriggerConfig(kind: TriggerKind, existing: Trigger?, onDismiss: () -
         }
         TriggerKind.LOCATION -> LocationConfig(existing as? Trigger.Location, onDismiss, onSave)
         TriggerKind.SUN -> SunConfig(existing as? Trigger.Sun, onDismiss, onSave)
+        TriggerKind.PRAYER -> PrayerConfig(existing as? Trigger.Prayer, onDismiss, onSave)
         TriggerKind.NOTIFICATION -> {
             val ctx = LocalContext.current
             val t = existing as? Trigger.NotificationFrom
@@ -923,6 +925,101 @@ private fun SunConfig(existing: Trigger.Sun?, onDismiss: () -> Unit, onSave: (Tr
         if (place.isNotBlank()) Text(place, fontSize = 13.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text("Sun times are computed offline from the location — no internet needed.",
+            fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/**
+ * Prayer-time trigger. Pick the prayer, how many minutes before/after, the city (Ghana's regional
+ * capitals as one-tap chips, or anywhere on the map), and the calculation method. Today's real
+ * time is shown live, so you can compare it with your mosque before saving.
+ */
+@Composable
+private fun PrayerConfig(existing: Trigger.Prayer?, onDismiss: () -> Unit, onSave: (Trigger) -> Unit) {
+    var prayer by remember { mutableStateOf(existing?.prayer ?: Prayer.DHUHR) }
+    var offset by remember { mutableIntStateOf(existing?.offsetMin ?: -5) }
+    var place by remember { mutableStateOf(existing?.place ?: "") }
+    var lat by remember { mutableDoubleStateOf(existing?.lat ?: 0.0) }
+    var lng by remember { mutableDoubleStateOf(existing?.lng ?: 0.0) }
+    var method by remember { mutableStateOf(existing?.method ?: PrayerMethod.MWL) }
+    var school by remember { mutableStateOf(existing?.school ?: AsrSchool.SHAFII) }
+    var showMap by remember { mutableStateOf(false) }
+    var showMethods by remember { mutableStateOf(false) }
+
+    if (showMap) {
+        Dialog(onDismissRequest = { showMap = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Surface(Modifier.fillMaxSize()) {
+                PlacePicker(
+                    initial = if (place.isNotBlank()) Trigger.Location(true, lat, lng, 200f, place) else null,
+                    onBack = { showMap = false },
+                    onDone = { p, la, ln, _ -> place = p; lat = la; lng = ln; showMap = false },
+                )
+            }
+        }
+        return
+    }
+
+    val today = remember(prayer, place, lat, lng, method, school) {
+        if (place.isBlank()) null else PrayerCalc.day(java.time.LocalDate.now(), lat, lng,
+            java.time.ZoneId.systemDefault(), method, school)?.times?.get(prayer)
+    }
+
+    ConfigDialog("Prayer time", canSave = place.isNotBlank(), onDismiss = onDismiss,
+        onSave = { onSave(Trigger.Prayer(prayer, offset, lat, lng, place, method, school)) }) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Prayer.entries.forEach { p ->
+                FilterChip(selected = prayer == p, onClick = { prayer = p }, label = { Text(p.label()) })
+            }
+        }
+        Column {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("When", fontSize = 14.sp)
+                Text(when {
+                    offset == 0 -> "exactly at ${prayer.label()}"
+                    offset > 0 -> "$offset min after"
+                    else -> "${-offset} min before"
+                }, fontWeight = FontWeight.SemiBold)
+            }
+            Slider(value = offset.toFloat(), onValueChange = { offset = it.toInt() },
+                valueRange = -60f..60f, steps = 23)
+        }
+        Text("City", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            PrayerCalc.GHANA_CITIES.forEach { (name, ll) ->
+                FilterChip(selected = place == name, onClick = { place = name; lat = ll.first; lng = ll.second },
+                    label = { Text(name) })
+            }
+            AssistChip(onClick = { showMap = true }, label = { Text("Somewhere else") },
+                leadingIcon = { Icon(Icons.Filled.Map, null, Modifier.size(16.dp)) })
+        }
+        if (place.isNotBlank() && place !in PrayerCalc.GHANA_CITIES) Text(place, fontSize = 13.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        Text("Method: ${method.label()} · Asr: ${school.label()} (tap to change)", fontSize = 13.sp,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { showMethods = !showMethods }
+                .padding(vertical = 6.dp))
+        if (showMethods) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                PrayerMethod.entries.forEach { m ->
+                    FilterChip(selected = method == m, onClick = { method = m }, label = { Text(m.label()) })
+                }
+            }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                AsrSchool.entries.forEach { s ->
+                    FilterChip(selected = school == s, onClick = { school = s }, label = { Text(s.label()) })
+                }
+            }
+        }
+
+        today?.let { t ->
+            val fmt = java.time.format.DateTimeFormatter.ofPattern("HH:mm")
+            Text("Today: ${prayer.label()} is at ${t.format(fmt)}, so this runs at ${t.plusMinutes(offset.toLong()).format(fmt)}.",
+                fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        }
+        Text("Worked out on the phone from the sun's position, no internet needed. " +
+            "Your mosque's congregation time may be a few minutes later: use the slider for that.",
             fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
@@ -1308,6 +1405,7 @@ private fun IconPickerDialog(onPick: (String) -> Unit, onDismiss: () -> Unit) {
 private fun kindOf(t: Trigger): TriggerKind = when (t) {
     is Trigger.TimeOfDay -> TriggerKind.TIME
     is Trigger.Sun -> TriggerKind.SUN
+    is Trigger.Prayer -> TriggerKind.PRAYER
     is Trigger.NotificationFrom -> TriggerKind.NOTIFICATION
     is Trigger.CalendarEvent -> TriggerKind.CALENDAR
     is Trigger.Motion -> TriggerKind.MOTION

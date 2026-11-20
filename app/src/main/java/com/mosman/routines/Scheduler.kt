@@ -33,6 +33,10 @@ object Scheduler {
         SunCalc.next(t)?.let { setAlarm(ctx, r, index, it.toInstant().toEpochMilli()) }
     }
 
+    fun schedulePrayer(ctx: Context, r: Routine, index: Int, t: Trigger.Prayer) {
+        PrayerCalc.next(t)?.let { setAlarm(ctx, r, index, it.toInstant().toEpochMilli()) }
+    }
+
     /** Arms an alarm for the next matching calendar event's start (or end). */
     fun scheduleCalendar(ctx: Context, r: Routine, index: Int, t: Trigger.CalendarEvent) {
         val event = Calendars.nextMatching(ctx, t.titleContains, t.atStart) ?: return

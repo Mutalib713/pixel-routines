@@ -47,6 +47,7 @@ object Engine {
         when (t) {
             is Trigger.TimeOfDay -> Scheduler.scheduleTime(ctx, r, index, t)
             is Trigger.Sun -> Scheduler.scheduleSun(ctx, r, index, t)
+            is Trigger.Prayer -> Scheduler.schedulePrayer(ctx, r, index, t)
             is Trigger.CalendarEvent -> Scheduler.scheduleCalendar(ctx, r, index, t)
             is Trigger.Location -> Geofences.add(ctx, r, index, t)
             else -> Unit // event triggers are handled by EventService / listeners
@@ -70,6 +71,7 @@ object Engine {
         when (val t = list.getOrNull(if (isEnd) index - END_OFFSET else index)) {
             is Trigger.TimeOfDay -> Scheduler.scheduleTime(ctx, r, index, t)
             is Trigger.Sun -> Scheduler.scheduleSun(ctx, r, index, t)
+            is Trigger.Prayer -> Scheduler.schedulePrayer(ctx, r, index, t)
             is Trigger.CalendarEvent -> Scheduler.scheduleCalendar(ctx, r, index, t)
             else -> Unit
         }
@@ -187,7 +189,7 @@ object Engine {
     /** True for triggers the EventService must stay alive to notice. */
     private fun isEventTrigger(t: Trigger): Boolean = when (t) {
         // Handled by alarms, geofences, or their own listener services instead:
-        is Trigger.TimeOfDay, is Trigger.Sun, is Trigger.CalendarEvent, is Trigger.Location,
+        is Trigger.TimeOfDay, is Trigger.Sun, is Trigger.Prayer, is Trigger.CalendarEvent, is Trigger.Location,
         is Trigger.NotificationFrom, is Trigger.Motion, is Trigger.NfcTag -> false
         else -> true
     }

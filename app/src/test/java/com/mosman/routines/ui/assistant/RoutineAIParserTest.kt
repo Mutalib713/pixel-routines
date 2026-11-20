@@ -19,6 +19,15 @@ import org.junit.Test
  */
 class RoutineAIParserTest {
 
+    @Test fun prayerTimes_answeredOnThePhone() {
+        val r = RoutineAIParser.parse("prayer times in kumasi", null, emptyList())
+        assertTrue(r.explanation, r.explanation.contains("## Prayer times in Kumasi today"))
+        listOf("Fajr", "Dhuhr", "Asr", "Maghrib", "Isha").forEach { assertTrue(it, r.explanation.contains(it)) }
+        assertNull(r.draft)
+        val noCity = RoutineAIParser.parse("when is asr today", null, emptyList())
+        assertTrue(noCity.explanation, noCity.explanation.startsWith("Which city?"))
+    }
+
     @Test fun listQuestion_groupsRoutinesIntoSections() {
         val on = Routine(id = 1, name = "Class mode", triggers = listOf(Trigger.TimeOfDay(8, 0, setOf(1, 2, 3, 4, 5))),
             actions = listOf(Action.Ringer(RingerMode.SILENT)))

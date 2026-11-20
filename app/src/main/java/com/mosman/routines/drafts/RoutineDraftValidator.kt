@@ -125,6 +125,12 @@ object RoutineDraftValidator {
                 if (trigger.place.isBlank()) errors.add("$prefix: place name cannot be blank.")
             }
 
+            is Trigger.Prayer -> {
+                if (trigger.offsetMin !in -180..180) {
+                    errors.add("$prefix: prayer offset minutes must be between -180 and 180.")
+                }
+            }
+
             is Trigger.Sun -> {
                 if (trigger.offsetMin !in -720..720) {
                     errors.add("$prefix: sun offset minutes must be between -720 and 720.")

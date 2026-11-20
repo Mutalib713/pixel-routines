@@ -15,12 +15,13 @@ object Ic {
     val routinePicker: List<String> = listOf(
         "bedtime", "sunny", "school", "work", "home", "car", "headphones", "battery",
         "fitness", "movie", "games", "coffee", "meditation", "flight", "wifi", "moon",
-        "alarm", "bolt", "star", "music", "silent", "location",
+        "alarm", "bolt", "star", "music", "silent", "location", "prayer",
     )
 
     private val map: Map<String, ImageVector> = mapOf(
         // routine identities
         "bedtime" to Icons.Filled.Bedtime,
+        "prayer" to Icons.Filled.Mosque,
         "sunny" to Icons.Filled.WbSunny,
         "school" to Icons.Filled.School,
         "work" to Icons.Filled.Work,

@@ -56,6 +56,7 @@ object RoutineAIParser {
         }
         val lower = text.lowercase().trim().trimEnd('.', '!')
         if (LIST.containsMatchIn(lower.trimEnd('?'))) return listAnswer(saved, activeIds)
+        prayerTimes(lower, saved)?.let { return it }
         manage(lower, saved)?.let { return it }
         question(lower, saved)?.let { return it }
         edit(lower, saved)?.let { return it }
@@ -99,6 +100,46 @@ object RoutineAIParser {
         append("- **When:** ${r.ifSummary()}\n")
         append("- **Then:** ${r.thenSummary()}")
         r.endSummary()?.let { append("\n- **Until:** $it") }
+    }
+
+    // ---------------------------------------------------------------- prayer times
+
+    private val PRAYER_WORD = Regex("\\b(prayer|prayers|salah|salat|namaz|fajr|subh|dhuhr|zuhr|zohr|asr|maghrib|isha)\\b")
+    private val PRAYER_ASK = Regex("\\b(times?|when|what time|today|tomorrow)\\b")
+
+    /**
+     * "Prayer times in Kumasi" / "when is asr": answered on the phone with PrayerCalc. The chat
+     * used to say it couldn't search the web; it doesn't need to, the times come from the sun.
+     * The city comes from the message, else from a saved prayer routine, else we ask.
+     */
+    private fun prayerTimes(lower: String, saved: List<Routine>): ParsedAIResponse? {
+        if (!PRAYER_WORD.containsMatchIn(lower) || !PRAYER_ASK.containsMatchIn(lower)) return null
+        val savedPrayer = saved.flatMap { it.triggers + it.endTriggers }.filterIsInstance<Trigger.Prayer>().firstOrNull()
+        val named = com.mosman.routines.PrayerCalc.GHANA_CITIES.entries.firstOrNull { lower.contains(it.key.lowercase()) }
+        val (place, ll) = when {
+            named != null -> named.key to named.value
+            savedPrayer != null -> savedPrayer.place to (savedPrayer.lat to savedPrayer.lng)
+            else -> return ParsedAIResponse(
+                "Which city? I can work prayer times out on the phone for any of these:\n\n" +
+                    com.mosman.routines.PrayerCalc.GHANA_CITIES.keys.joinToString("\n") { "- $it" } +
+                    "\n\nFor somewhere else, make a routine with the Prayer time trigger and pick the place on the map.",
+                null,
+            )
+        }
+        val method = savedPrayer?.method ?: com.mosman.routines.PrayerMethod.MWL
+        val school = savedPrayer?.school ?: com.mosman.routines.AsrSchool.SHAFII
+        val tomorrow = Regex("\\btomorrow\\b").containsMatchIn(lower)
+        val date = java.time.LocalDate.now().let { if (tomorrow) it.plusDays(1) else it }
+        val day = com.mosman.routines.PrayerCalc.day(date, ll.first, ll.second, java.time.ZoneId.systemDefault(), method, school)
+            ?: return ParsedAIResponse("I couldn't work out prayer times for $place.", null)
+        val fmt = java.time.format.DateTimeFormatter.ofPattern("HH:mm")
+        val list = day.times.entries.joinToString("\n") { (p, t) -> "- **${p.label()}** ${t.format(fmt)}" }
+        return ParsedAIResponse(
+            "## Prayer times in $place ${if (tomorrow) "tomorrow" else "today"}\n$list\n\n" +
+                "Worked out on the phone (${method.label()}, ${school.label()} Asr). " +
+                "Your mosque's congregation times may be a few minutes later.",
+            null,
+        )
     }
 
     /** "What routines do I have?" / "What's running?": every saved routine, grouped. */
