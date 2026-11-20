@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.AddToHomeScreen
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -157,238 +158,189 @@ fun EditorScreen(
     )
     val valid = triggers.isNotEmpty() && actions.isNotEmpty()
 
-    var editorMode by remember {
-        mutableStateOf(if (conditions.isNotEmpty() || endTriggers.isNotEmpty() || triggers.size > 1) EditorMode.ADVANCED else EditorMode.BASIC)
-    }
+    var menuOpen by remember { mutableStateOf(false) }
+    val draft = result()
 
+    // Layout B (picked 2026-11-20): WHEN · ONLY IF · THEN · UNTIL are always on screen as four
+    // bands, each with its own +. Empty optional bands stay one line tall. This replaced the
+    // Basic/Advanced switch, which hid conditions and end triggers behind a mode change.
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(if (existing) "Edit routine" else "New routine") },
                 navigationIcon = { IconButton(onClick = onBack) { BackIcon() } },
                 actions = {
-                    if (existing) IconButton(onClick = { onDelete(initial) }) {
-                        Icon(Icons.Filled.Delete, "Delete", tint = MaterialTheme.colorScheme.error)
+                    if (existing) Box {
+                        IconButton(onClick = { menuOpen = true }) { Icon(Icons.Filled.MoreVert, "More options") }
+                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                            DropdownMenuItem(
+                                text = { Text("Add to home screen") },
+                                leadingIcon = { Icon(Icons.Filled.AddToHomeScreen, null) },
+                                onClick = {
+                                    menuOpen = false
+                                    if (RunActivity.pinShortcut(ctx, draft))
+                                        android.widget.Toast.makeText(ctx, "Check your home screen",
+                                            android.widget.Toast.LENGTH_SHORT).show()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                                leadingIcon = { Icon(Icons.Filled.Delete, null, tint = MaterialTheme.colorScheme.error) },
+                                onClick = { menuOpen = false; onDelete(initial) },
+                            )
+                        }
                     }
                 },
             )
         },
         bottomBar = {
-            Surface(tonalElevation = 3.dp) {
-                Box(Modifier.fillMaxWidth().padding(16.dp)) {
+            Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
+                Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    if (!valid) Text("Add a WHEN and a THEN to save.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 8.dp).align(Alignment.CenterHorizontally))
                     Button(onClick = {
                         val r = result()
                         val hits = SimilarRoutines.find(r, Store.load(ctx))
                         if (hits.isEmpty()) onSave(r) else similar = hits
-                    }, enabled = valid,
-                        modifier = Modifier.fillMaxWidth().height(52.dp),
-                        shape = RoundedCornerShape(18.dp)) {
-                        Text("Save routine", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    }, enabled = valid, modifier = Modifier.fillMaxWidth().height(52.dp)) {
+                        Text("Save", style = MaterialTheme.typography.titleMedium)
                     }
                 }
             }
         },
     ) { pad ->
         Column(
-            Modifier.fillMaxSize().padding(pad).verticalScroll(rememberScrollState()).padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            Modifier.fillMaxSize().padding(pad).verticalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            // Basic vs Advanced Tabs (Matching Screen 7)
-            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                EditorMode.entries.forEachIndexed { i, m ->
-                    SegmentedButton(
-                        selected = editorMode == m,
-                        onClick = { editorMode = m },
-                        shape = SegmentedButtonDefaults.itemShape(i, EditorMode.entries.size),
-                    ) {
-                        Text(m.label, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                    }
-                }
-            }
-
             // Name + icon
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(56.dp).clip(CircleShape)
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 4.dp)) {
+                Box(Modifier.size(52.dp).clip(CircleShape)
                     .background(MaterialTheme.colorScheme.primaryContainer)
                     .clickable { showIconPicker = true },
                     contentAlignment = Alignment.Center) {
-                    Icon(Ic.of(icon), "Choose icon", Modifier.size(28.dp),
+                    Icon(Ic.of(icon), "Choose icon", Modifier.size(26.dp),
                         tint = MaterialTheme.colorScheme.onPrimaryContainer)
                 }
                 Spacer(Modifier.width(12.dp))
                 OutlinedTextField(value = name, onValueChange = { name = it },
-                    label = { Text("Routine name") }, placeholder = { Text("e.g. Study Focus") },
+                    label = { Text("Name") }, placeholder = { Text("e.g. Study Focus") },
                     singleLine = true, modifier = Modifier.weight(1f))
             }
 
-            if (editorMode == EditorMode.BASIC) {
-                // ---- BASIC MODE ----
-                SectionHeader("WHEN", "this trigger fires", MaterialTheme.colorScheme.primary)
-                if (triggers.isEmpty()) {
-                    AddButton("Choose trigger") { triggerSheetFor = false }
-                } else {
-                    triggers.forEachIndexed { i, t ->
-                        ItemRow(t.icon(), t.describe(),
-                            onClick = { editTrigger = TrigEdit(kindOf(t), i, false) },
-                            onRemove = { triggers.removeAt(i) })
-                    }
-                    if (triggers.size < 2) {
-                        AddButton("Change trigger") { triggerSheetFor = false }
-                    }
-                }
+            // One plain line that says what the routine does, updated as you build it.
+            if (valid) Text(
+                editorSummary(draft),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 8.dp),
+            )
 
-                SectionHeader("THEN", "take these actions", MaterialTheme.colorScheme.tertiary)
-                actions.forEachIndexed { i, a ->
-                    ItemRow(a.icon(), a.describe(),
-                        onClick = { editAction = ActEdit(kindOf(a), i, false) },
-                        onRemove = { actions.removeAt(i) },
-                        badge = accessBadge(ctx, a.access()))
-                }
-                AddButton("Add action") { actionSheetFor = false }
-
-                Card(
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Looking for conditions or end actions?", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                            Text("Switch to Advanced mode to combine multiple triggers, time windows, and restore settings.",
-                                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        TextButton(onClick = { editorMode = EditorMode.ADVANCED }) {
-                            Text("Advanced", fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            } else {
-                // ---- ADVANCED MODE ----
-                // IF
-                SectionHeader("IF", "this happens", MaterialTheme.colorScheme.primary)
+            // WHEN
+            Band("WHEN", "this happens",
+                filled = triggers.isNotEmpty(), addLabel = "Add a trigger",
+                onAdd = { triggerSheetFor = false }) {
                 if (triggers.size > 1) {
-                    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp)) {
                         Match.entries.forEachIndexed { i, m ->
                             SegmentedButton(selected = match == m, onClick = { match = m },
                                 shape = SegmentedButtonDefaults.itemShape(i, Match.entries.size)) {
-                                Text(m.label(), fontSize = 13.sp)
+                                Text(m.label(), style = MaterialTheme.typography.labelLarge)
                             }
                         }
                     }
                 }
                 triggers.forEachIndexed { i, t ->
-                    ItemRow(t.icon(), t.describe(),
+                    BandItem(t.icon(), t.describe(),
                         onClick = { editTrigger = TrigEdit(kindOf(t), i, false) },
                         onRemove = { triggers.removeAt(i) })
                 }
-                AddButton("Add trigger") { triggerSheetFor = false }
+            }
 
-                // ONLY IF
-                SectionHeader("ONLY IF", "these also hold (optional)", MaterialTheme.colorScheme.secondary)
+            // ONLY IF
+            Band("ONLY IF", if (conditions.isEmpty()) "nothing extra" else "all of these hold",
+                filled = conditions.isNotEmpty(), addLabel = "Add a condition",
+                onAdd = { showConditionSheet = true }) {
                 conditions.forEachIndexed { i, c ->
-                    ItemRow("check", c.describe().replaceFirstChar { it.uppercase() },
+                    BandItem("check", c.describe().replaceFirstChar { it.uppercase() },
                         onClick = { editCondition = kindOfCond(c) to i },
                         onRemove = { conditions.removeAt(i) })
                 }
-                AddButton("Add condition") { showConditionSheet = true }
+            }
 
-                // THEN
-                SectionHeader("THEN", "do this", MaterialTheme.colorScheme.tertiary)
+            // THEN
+            Band("THEN", "do these", filled = actions.isNotEmpty(), addLabel = "Add an action",
+                onAdd = { actionSheetFor = false }) {
                 actions.forEachIndexed { i, a ->
-                    ItemRow(a.icon(), a.describe(),
+                    BandItem(a.icon(), a.describe(),
                         onClick = { editAction = ActEdit(kindOf(a), i, false) },
                         onRemove = { actions.removeAt(i) },
                         badge = accessBadge(ctx, a.access()))
                 }
-                AddButton("Add action") { actionSheetFor = false }
+            }
 
-                // UNTIL (end condition)
-                SectionHeader("UNTIL", "the routine should stop (optional)",
-                    MaterialTheme.colorScheme.secondary)
+            // UNTIL
+            Band("UNTIL", if (endTriggers.isEmpty()) "runs once, no end" else "this happens, then…",
+                filled = endTriggers.isNotEmpty(), addLabel = "Add an end",
+                onAdd = { triggerSheetFor = true }) {
                 endTriggers.forEachIndexed { i, t ->
-                    ItemRow(t.icon(), t.describe(),
+                    BandItem(t.icon(), t.describe(),
                         onClick = { editTrigger = TrigEdit(kindOf(t), i, true) },
                         onRemove = { endTriggers.removeAt(i) })
                 }
-                AddButton("Add end condition") { triggerSheetFor = true }
-
                 if (endTriggers.isNotEmpty()) {
-                    Text("When it stops", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp)) {
                         EndMode.entries.forEachIndexed { i, m ->
                             SegmentedButton(selected = endMode == m, onClick = { endMode = m },
                                 shape = SegmentedButtonDefaults.itemShape(i, EndMode.entries.size)) {
-                                Text(m.label(), fontSize = 12.sp, maxLines = 1)
+                                Text(when (m) {
+                                    EndMode.NOTHING -> "Leave it"
+                                    EndMode.REVERT -> "Put it back"
+                                    EndMode.CUSTOM -> "Do other things"
+                                }, style = MaterialTheme.typography.labelMedium, maxLines = 1)
                             }
                         }
                     }
                     if (endMode == EndMode.REVERT) Text(
-                        "Your settings go back exactly how they were before the routine ran.",
-                        fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        "Your settings go back to how they were before it ran.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 10.dp))
                     if (endMode == EndMode.CUSTOM) {
                         endActions.forEachIndexed { i, a ->
-                            ItemRow(a.icon(), a.describe(),
+                            BandItem(a.icon(), a.describe(),
                                 onClick = { editAction = ActEdit(kindOf(a), i, true) },
                                 onRemove = { endActions.removeAt(i) },
                                 badge = accessBadge(ctx, a.access()))
                         }
-                        AddButton("Add end action") { actionSheetFor = true }
-                    }
-                }
-            }
-
-            // Plain-Language Summary Box
-            if (valid) {
-                Card(
-                    shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("Routine Summary", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
-                        Text("WHEN ${result().ifSummary()}", fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                        Text("THEN ${result().thenSummary()}", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        result().endSummary()?.let {
-                            Text("UNTIL $it", fontSize = 13.sp, color = MaterialTheme.colorScheme.secondary)
+                        TextButton(onClick = { actionSheetFor = true },
+                            modifier = Modifier.padding(start = 6.dp, bottom = 4.dp)) {
+                            Icon(Icons.Filled.Add, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp))
+                            Text("Add an end action")
                         }
                     }
                 }
             }
 
-            // One-tap shortcut on the home screen
-            if (existing) OutlinedButton(
-                onClick = {
-                    if (RunActivity.pinShortcut(ctx, result()))
-                        android.widget.Toast.makeText(ctx, "Check your home screen",
-                            android.widget.Toast.LENGTH_SHORT).show()
-                },
-                modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp)) {
-                Icon(Icons.Filled.AddToHomeScreen, null, Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("Add a shortcut to the home screen")
-            }
-
-            // Notify toggle
-            Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
-                Row(Modifier.padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+            // Notify
+            Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
+                Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
                     verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("Notify when it runs", fontSize = 15.sp)
+                        Text("Notify when it runs", style = MaterialTheme.typography.bodyLarge)
                         Text("Turn off for a routine that should work quietly",
-                            fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Switch(checked = notifyOnRun, onCheckedChange = { notifyOnRun = it })
                 }
             }
-
-            if (!valid) Text("Add at least one trigger and one action to save.",
-                fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(8.dp))
         }
     }
-
     // ---- Picker sheets ----
     triggerSheetFor?.let { isEnd ->
         PickSheet(if (isEnd) "What ends this routine?" else "Choose a trigger",
@@ -443,6 +395,82 @@ fun EditorScreen(
 
     if (showIconPicker) IconPickerDialog(
         onPick = { icon = it; showIconPicker = false }, onDismiss = { showIconPicker = false })
+}
+
+/**
+ * The one-line summary at the top of the editor. Lists triggers in full when there are one or
+ * two; past that it counts them, because a routine like Lecture Mode with four start times
+ * turned the full list into a paragraph nobody reads.
+ */
+private fun editorSummary(r: Routine): String {
+    fun list(ts: List<Trigger>) = when {
+        ts.size <= 2 -> ts.joinToString(" or ") { it.describe().replaceFirstChar { c -> c.lowercase() } }
+        ts.all { it is Trigger.TimeOfDay } -> "at ${ts.size} set times"
+        else -> "on any of ${ts.size} triggers"
+    }
+    val start = list(r.triggers).replaceFirstChar { it.uppercase() }
+    val end = if (r.endTriggers.isEmpty()) "" else {
+        val then = when (r.endMode) {
+            EndMode.REVERT -> ", then puts things back"
+            EndMode.CUSTOM -> ", then does other things"
+            EndMode.NOTHING -> ""
+        }
+        ". Ends ${list(r.endTriggers)}$then"
+    }
+    return "$start → ${r.thenSummary()}$end."
+}
+
+// ============================================================================
+//  Layout B bands
+// ============================================================================
+
+/**
+ * One of the four editor sections. The tag pill is filled when the band has something in it
+ * and muted when it's an empty optional part, so a glance shows which parts are in use.
+ */
+@Composable
+private fun Band(
+    tag: String, sub: String, filled: Boolean, addLabel: String,
+    onAdd: () -> Unit, content: @Composable ColumnScope.() -> Unit,
+) {
+    Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
+        Column(Modifier.fillMaxWidth().padding(bottom = if (filled) 6.dp else 0.dp)) {
+            Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp, top = 4.dp, bottom = 2.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.clip(RoundedCornerShape(8.dp))
+                    .background(if (filled) MaterialTheme.colorScheme.primaryContainer
+                        else MaterialTheme.colorScheme.surfaceContainerHighest)
+                    .padding(horizontal = 8.dp, vertical = 3.dp)) {
+                    Text(tag, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
+                        color = if (filled) MaterialTheme.colorScheme.onPrimaryContainer
+                            else MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Spacer(Modifier.width(10.dp))
+                Text(sub, style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                IconButton(onClick = onAdd) { Icon(Icons.Filled.Add, addLabel) }
+            }
+            content()
+        }
+    }
+}
+
+@Composable
+private fun BandItem(iconKey: String, text: String, onClick: () -> Unit, onRemove: () -> Unit,
+                     badge: String? = null) {
+    HorizontalDivider(color = MaterialTheme.colorScheme.surface, thickness = 1.dp)
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick)
+        .padding(start = 16.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Icon(Ic.of(iconKey), null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f).padding(vertical = 10.dp)) {
+            Text(text, style = MaterialTheme.typography.bodyLarge)
+            if (badge != null) Text(badge, style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error)
+        }
+        IconButton(onClick = onRemove) { Icon(Icons.Filled.Close, "Remove", Modifier.size(18.dp)) }
+    }
 }
 
 // ============================================================================
