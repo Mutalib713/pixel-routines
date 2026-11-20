@@ -29,6 +29,7 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Image
@@ -52,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import com.mosman.routines.Ic
 import com.mosman.routines.Routine
+import com.mosman.routines.SimilarRoutines
 import com.mosman.routines.Store
 import com.mosman.routines.ai.AssistantMode
 import com.mosman.routines.ai.AssistantPrefs
@@ -591,6 +593,13 @@ private fun ProposalCard(
         else -> Triple(Ic.of(r?.icon ?: "star"), r?.name ?: "New routine", "Save")
     }
     val subtitle = if (r != null && d.operation == DraftOperation.CREATE) oneLine(r) else d.explanation
+    // Same check the manual editor runs, shown up front (not hidden in the details) so a
+    // near-duplicate is seen before tapping Save.
+    val ctx = LocalContext.current
+    val similar = remember(d.draftId) {
+        if (r == null || (d.operation != DraftOperation.CREATE && d.operation != DraftOperation.UPDATE)) emptyList()
+        else SimilarRoutines.find(d.targetRoutineId?.let { r.copy(id = it) } ?: r, Store.load(ctx))
+    }
 
     Surface(
         shape = Shp.card,
@@ -623,6 +632,22 @@ private fun ProposalCard(
                     contentDescription = if (open) "Hide details" else "Show details",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+
+            if (similar.isNotEmpty()) {
+                Spacer(Modifier.height(Sp.s))
+                Row(
+                    Modifier.fillMaxWidth().clip(Shp.tile)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                        .padding(Sp.m),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Icon(Icons.Outlined.Info, contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(Sp.s))
+                    Text(SimilarRoutines.lines(similar).joinToString("\n"), style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface)
+                }
             }
 
             if (open) {

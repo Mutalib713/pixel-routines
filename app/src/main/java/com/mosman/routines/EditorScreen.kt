@@ -148,6 +148,8 @@ fun EditorScreen(
         editCondition = null
     }
 
+    var similar by remember { mutableStateOf<List<SimilarRoutines.Similar>>(emptyList()) }
+
     fun result() = initial.copy(
         name = name.ifBlank { "Routine" }, icon = icon, match = match, notifyOnRun = notifyOnRun,
         triggers = triggers.toList(), conditions = conditions.toList(), actions = actions.toList(),
@@ -174,7 +176,11 @@ fun EditorScreen(
         bottomBar = {
             Surface(tonalElevation = 3.dp) {
                 Box(Modifier.fillMaxWidth().padding(16.dp)) {
-                    Button(onClick = { onSave(result()) }, enabled = valid,
+                    Button(onClick = {
+                        val r = result()
+                        val hits = SimilarRoutines.find(r, Store.load(ctx))
+                        if (hits.isEmpty()) onSave(r) else similar = hits
+                    }, enabled = valid,
                         modifier = Modifier.fillMaxWidth().height(52.dp),
                         shape = RoundedCornerShape(18.dp)) {
                         Text("Save routine", fontSize = 16.sp, fontWeight = FontWeight.Bold)
@@ -424,6 +430,17 @@ fun EditorScreen(
             editCondition = null
         }
     }
+    // Warn before saving something that repeats or clashes with a routine you already have.
+    if (similar.isNotEmpty()) AlertDialog(
+        onDismissRequest = { similar = emptyList() },
+        title = { Text("You already have something like this") },
+        text = { Text(SimilarRoutines.lines(similar).joinToString(separator = "\n\n")) },
+        confirmButton = {
+            TextButton(onClick = { similar = emptyList(); onSave(result()) }) { Text("Save anyway") }
+        },
+        dismissButton = { TextButton(onClick = { similar = emptyList() }) { Text("Go back") } },
+    )
+
     if (showIconPicker) IconPickerDialog(
         onPick = { icon = it; showIconPicker = false }, onDismiss = { showIconPicker = false })
 }
