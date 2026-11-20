@@ -403,11 +403,7 @@ fun EditorScreen(
  * turned the full list into a paragraph nobody reads.
  */
 private fun editorSummary(r: Routine): String {
-    fun list(ts: List<Trigger>) = when {
-        ts.size <= 2 -> ts.joinToString(" or ") { it.describe().replaceFirstChar { c -> c.lowercase() } }
-        ts.all { it is Trigger.TimeOfDay } -> "at ${ts.size} set times"
-        else -> "on any of ${ts.size} triggers"
-    }
+    fun list(ts: List<Trigger>) = RoutineText.triggers(ts)
     val start = list(r.triggers).replaceFirstChar { it.uppercase() }
     val end = if (r.endTriggers.isEmpty()) "" else {
         val then = when (r.endMode) {

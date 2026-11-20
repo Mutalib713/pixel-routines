@@ -134,7 +134,7 @@ object LectureMode {
                 draftId = "lecture-${r.id}",
                 operation = DraftOperation.CREATE,
                 proposedRoutine = r,
-                explanation = "${slots.size} classes on $days:\n$list",
+                explanation = "## ${slots.size} classes on $days\n$list",
                 questions = notes,
                 requiresApproval = true,
             )

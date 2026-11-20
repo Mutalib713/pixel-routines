@@ -209,9 +209,8 @@ fun AssistantScreenRedesigned(
         thinking = null
         result.onSuccess { post(GeminiProposalMapper.map(it, saved), saved, SOURCE_ONLINE) }
             .onFailure { e ->
-                messages.add(ChatMessage(isUser = false, source = SOURCE_OFFLINE,
-                    text = "The online assistant isn't reachable right now (${GeminiAssistant.describeError(e)}). Answering on the phone instead:"))
-                post(offline, saved, SOURCE_OFFLINE)
+                // Said in the small source line under the answer, not as a message of its own.
+                post(offline, saved, "$SOURCE_OFFLINE · Gemini couldn't be reached (${GeminiAssistant.describeError(e)})")
             }
     }
 
@@ -224,9 +223,7 @@ fun AssistantScreenRedesigned(
         thinking = null
         result.onSuccess { post(GeminiProposalMapper.mapAttachment(it, p.saved), p.saved, SOURCE_ONLINE) }
             .onFailure { e ->
-                messages.add(ChatMessage(isUser = false, source = SOURCE_OFFLINE,
-                    text = "Gemini couldn't read it (${GeminiAssistant.describeError(e)}). The phone found this instead:"))
-                post(p.offline, p.saved, SOURCE_OFFLINE)
+                post(p.offline, p.saved, "$SOURCE_OFFLINE · Gemini couldn't read it (${GeminiAssistant.describeError(e)})")
             }
     }
 
@@ -249,7 +246,7 @@ fun AssistantScreenRedesigned(
             val saved = Store.load(context)
 
             if (p == null) {
-                val parsed = RoutineAIParser.parse(text, null, saved)
+                val parsed = RoutineAIParser.parse(text, null, saved, Store.activeIds(context))
                 when {
                     !AssistantPrefs.wantsOnline(mode, parsed.handled, hasPhoto = false) -> { thinking = null; post(parsed, saved, SOURCE_OFFLINE) }
                     AssistantPrefs.hasConsent(context) -> askGeminiNow(text, parsed, saved)
@@ -556,7 +553,7 @@ private fun AssistantMessage(
 ) {
     Column(Modifier.fillMaxWidth()) {
         if (msg.text.isNotBlank()) {
-            Text(msg.text, style = MaterialTheme.typography.bodyLarge)
+            ChatText(msg.text)
         }
         msg.draft?.let { d ->
             Spacer(Modifier.height(Sp.s))
@@ -654,7 +651,7 @@ private fun ProposalCard(
                 Spacer(Modifier.height(Sp.m))
                 if (r != null && d.operation == DraftOperation.CREATE) {
                     if (d.explanation.contains('\n')) {
-                        Text(d.explanation, style = MaterialTheme.typography.bodySmall)
+                        ChatText(d.explanation, style = MaterialTheme.typography.bodyMedium)
                         Spacer(Modifier.height(Sp.s))
                     }
                     DetailRow("WHEN", r.ifSummary())

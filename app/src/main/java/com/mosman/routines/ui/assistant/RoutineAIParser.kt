@@ -31,17 +31,20 @@ data class ParsedAIResponse(
  */
 object RoutineAIParser {
 
+    // Answers use ChatText's small format ("## " headings, "- " bullets) so they show in sections.
     private const val EXAMPLES =
-        "Try “Vibrate and Do Not Disturb at 8am on weekdays”, “Remind me to call Mum at 6pm” or “Pause Night Routine”."
+        "\n\n## Try something like\n- Vibrate and Do Not Disturb at 8am on weekdays\n" +
+            "- Remind me to call Mum at 6pm\n- Pause Night Routine"
 
     fun parse(
         userText: String,
         extractedOcrText: String? = null,
         saved: List<Routine> = emptyList(),
-    ): ParsedAIResponse = runCatching { route(userText.trim(), extractedOcrText, saved) }
-        .getOrElse { ParsedAIResponse("Sorry, I couldn't make sense of that one. $EXAMPLES", null, handled = false) }
+        activeIds: Set<Long> = emptySet(),
+    ): ParsedAIResponse = runCatching { route(userText.trim(), extractedOcrText, saved, activeIds) }
+        .getOrElse { ParsedAIResponse("Sorry, I couldn't make sense of that one.$EXAMPLES", null, handled = false) }
 
-    private fun route(text: String, ocr: String?, saved: List<Routine>): ParsedAIResponse {
+    private fun route(text: String, ocr: String?, saved: List<Routine>, activeIds: Set<Long>): ParsedAIResponse {
         if (!ocr.isNullOrBlank()) {
             val slots = findRanges(ocr).distinct()
             if (slots.size >= 2) return ParsedAIResponse(
@@ -52,6 +55,7 @@ object RoutineAIParser {
             )
         }
         val lower = text.lowercase().trim().trimEnd('.', '!')
+        if (LIST.containsMatchIn(lower.trimEnd('?'))) return listAnswer(saved, activeIds)
         manage(lower, saved)?.let { return it }
         question(lower, saved)?.let { return it }
         edit(lower, saved)?.let { return it }
@@ -84,15 +88,38 @@ object RoutineAIParser {
         return if (scored.count { it.second == best.second } > 1) null else best.first
     }
 
+    /** Starts with a blank line, so callers can tack it onto the end of a sentence. */
     private fun routineList(saved: List<Routine>): String =
-        if (saved.isEmpty()) "You don't have any routines yet."
-        else "Your routines: " + saved.joinToString { "“${it.name}”" } + "."
+        if (saved.isEmpty()) "\n\nYou don't have any routines yet."
+        else "\n\n## Your routines\n" + saved.joinToString("\n") { "- ${it.name.trim()}" }
 
     private fun describe(r: Routine): String = buildString {
-        append("“${r.name}” is ${if (r.enabled) "switched on" else "paused"}. ")
-        append("When: ${r.ifSummary()}. ")
-        append("Then: ${r.thenSummary()}.")
-        r.endSummary()?.let { append(" Until: $it.") }
+        append("## ${r.name.trim()}\n")
+        append("It's ${if (r.enabled) "switched on" else "paused"}.\n")
+        append("- **When:** ${r.ifSummary()}\n")
+        append("- **Then:** ${r.thenSummary()}")
+        r.endSummary()?.let { append("\n- **Until:** $it") }
+    }
+
+    /** "What routines do I have?" / "What's running?": every saved routine, grouped. */
+    private val LIST = Regex(
+        "^(?:what|which)\\s+routines\\b|^(?:show|list)(?:\\s+me)?(?:\\s+all)?(?:\\s+my)?\\s+routines\\b|" +
+            "^my routines$|^what(?:'s|s| is) running\\b"
+    )
+
+    private fun listAnswer(saved: List<Routine>, activeIds: Set<Long>): ParsedAIResponse {
+        if (saved.isEmpty()) return ParsedAIResponse("You don't have any routines yet.$EXAMPLES", null)
+        fun line(r: Routine) = "- **${r.name.trim()}**: ${com.mosman.routines.RoutineText.oneLine(r)}"
+        val running = saved.filter { it.id in activeIds }
+        val on = saved.filter { it.enabled && it.id !in activeIds }
+        val off = saved.filter { !it.enabled && it.id !in activeIds }
+        val parts = buildList {
+            add("You have ${saved.size} routine${if (saved.size == 1) "" else "s"}.")
+            if (running.isNotEmpty()) add("## Running now\n" + running.joinToString("\n") { line(it) })
+            if (on.isNotEmpty()) add("## On\n" + on.joinToString("\n") { line(it) })
+            if (off.isNotEmpty()) add("## Paused\n" + off.joinToString("\n") { line(it) })
+        }
+        return ParsedAIResponse(parts.joinToString("\n\n"), null)
     }
 
     private val MANAGE = listOf(
@@ -112,7 +139,7 @@ object RoutineAIParser {
             val r = findRoutine(phrase, saved, strict = true)
             if (r == null) {
                 if (verb in SOFT_VERBS) return null
-                return ParsedAIResponse("I couldn't find a routine called “$phrase”. ${routineList(saved)}", null)
+                return ParsedAIResponse("I couldn't find a routine called “$phrase”.${routineList(saved)}", null)
             }
             val (explanation, already) = when (op) {
                 DraftOperation.DISABLE -> "Pause “${r.name}”? It won't run until you switch it back on." to !r.enabled
@@ -150,14 +177,23 @@ object RoutineAIParser {
         val isQuestion = QUESTION.containsMatchIn(lower) ||
             (MAYBE_QUESTION.containsMatchIn(lower) && lower.endsWith("?"))
         if (!isQuestion) return null
+        // Two routines with the same name (two copies of Lecture Mode) used to count as "not
+        // sure which", so the question fell through to Gemini, which only knows names. Describe each.
+        val said = words(lower)
+        val sameName = saved.filter { r -> words(r.name).let { it.isNotEmpty() && it.all { w -> w in said } } }
+            .groupBy { it.name.trim().lowercase() }.values.singleOrNull()
+        if (sameName != null && sameName.size > 1) {
+            val extra = "\n\nYou have ${sameName.size} routines with this name. Open Routines to keep the one you want."
+            return ParsedAIResponse(sameName.joinToString("\n\n") { describe(it) } + extra, null)
+        }
         val r = findRoutine(lower, saved, strict = false)
             ?: return ParsedAIResponse(
-                "Offline, I can only explain the routines you've saved, by name. ${routineList(saved)} " +
-                    "Harder questions need the online assistant.",
+                "Offline, I can only explain the routines you've saved, by name. " +
+                    "Harder questions need the online assistant.${routineList(saved)}",
                 null,
                 handled = false,
             )
-        val extra = if (lower.startsWith("why")) " I can't read the run history from here yet. Check the Activity tab for what actually ran." else ""
+        val extra = if (lower.startsWith("why")) "\n\nI can't read the run history from here yet. Check Activity in Settings for what actually ran." else ""
         return ParsedAIResponse(describe(r) + extra, null)
     }
 
@@ -168,7 +204,7 @@ object RoutineAIParser {
         val r = findRoutine(lower, saved, strict = false) ?: return null
         return ParsedAIResponse(
             "Changing a saved routine isn't something I can do from chat yet. " +
-                "For now, open Routines and tap it to edit it yourself. Right now: ${describe(r)}",
+                "For now, open Routines and tap it to edit it yourself.\n\n${describe(r)}",
             null,
         )
     }

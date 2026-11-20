@@ -19,6 +19,17 @@ import org.junit.Test
  */
 class RoutineAIParserTest {
 
+    @Test fun listQuestion_groupsRoutinesIntoSections() {
+        val on = Routine(id = 1, name = "Class mode", triggers = listOf(Trigger.TimeOfDay(8, 0, setOf(1, 2, 3, 4, 5))),
+            actions = listOf(Action.Ringer(RingerMode.SILENT)))
+        val off = on.copy(id = 2, name = "Wake up", enabled = false)
+        val r = RoutineAIParser.parse("what routines do I have?", null, listOf(on, off), activeIds = emptySet())
+        assertTrue(r.explanation, r.explanation.contains("## On") && r.explanation.contains("## Paused"))
+        assertTrue(r.explanation, r.explanation.contains("- **Class mode**"))
+        val running = RoutineAIParser.parse("what's running", null, listOf(on, off), activeIds = setOf(1L))
+        assertTrue(running.explanation, running.explanation.contains("## Running now"))
+    }
+
     private val nightRoutine = Routine(id = 11, name = "Night Routine",
         triggers = listOf(Trigger.TimeOfDay(22, 0, (1..7).toSet())),
         actions = listOf(Action.Ringer(RingerMode.SILENT)))
