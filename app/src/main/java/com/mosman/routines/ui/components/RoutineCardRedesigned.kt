@@ -16,6 +16,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -134,9 +136,11 @@ fun RoutineCardRedesigned(
                     }
                 }
 
+                // Named, so a screen reader says which routine this switch belongs to.
                 Switch(
                     checked = routine.enabled,
                     onCheckedChange = onToggle,
+                    modifier = Modifier.semantics { contentDescription = "Switch ${routine.name.trim()} on or off" },
                 )
             }
 
