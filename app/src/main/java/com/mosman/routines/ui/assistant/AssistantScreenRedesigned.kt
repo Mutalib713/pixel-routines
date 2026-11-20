@@ -195,8 +195,12 @@ fun AssistantScreenRedesigned(
     // Shows an answer, with conflict warnings against saved routines; extra proposals get their own card.
     suspend fun post(parsed: ParsedAIResponse, saved: List<Routine>, source: String) {
         fun withConflicts(d: RoutineDraft?) = d?.let { draft ->
-            val c = draft.proposedRoutine?.let { RoutineConflictAnalyzer.analyze(it, saved) }.orEmpty()
-            draft.copy(warnings = draft.warnings + c.map { it.message })
+            val proposed = draft.proposedRoutine ?: return@let draft
+            // The card already shows SimilarRoutines' box; only add the older analyzer's
+            // warnings for routines that box doesn't mention, so one clash isn't said twice.
+            val shown = SimilarRoutines.find(proposed, saved).map { it.routine.id }.toSet()
+            val c = RoutineConflictAnalyzer.analyze(proposed, saved).filter { it.existingRoutineId !in shown }
+            draft.copy(warnings = draft.warnings + c.map { it.message }.distinct())
         }
         messages.add(ChatMessage(isUser = false, text = parsed.explanation, draft = withConflicts(parsed.draft), source = source))
         parsed.extraDrafts.forEach { messages.add(ChatMessage(isUser = false, text = "", draft = withConflicts(it), source = source)) }

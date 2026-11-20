@@ -135,7 +135,8 @@ object GeminiProposalMapper {
 
         val endTriggers = if (trigger is Trigger.TimeOfDay) {
             val eh = intOrNull(r, "endHour")
-            if (eh != null) listOf(Trigger.TimeOfDay(eh, intOrNull(r, "endMinute") ?: 0, days)) else emptyList()
+            if (eh != null) listOf(com.mosman.routines.RoutineText.endAt(
+                trigger.hour, trigger.minute, eh, intOrNull(r, "endMinute") ?: 0, days)) else emptyList()
         } else emptyList()
 
         val name = r.optString("name").trim().take(40).ifBlank { "New routine" }

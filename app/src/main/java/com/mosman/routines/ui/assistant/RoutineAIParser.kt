@@ -405,9 +405,9 @@ object RoutineAIParser {
         if (start != null) {
             triggers += Trigger.TimeOfDay(start.h, start.m, days)
             val end = range?.end
-            if (end != null) endTriggers += Trigger.TimeOfDay(end.h, end.m, days)
+            if (end != null) endTriggers += com.mosman.routines.RoutineText.endAt(start.h, start.m, end.h, end.m, days)
             else if (reminder == null && (ctxClass || ctxMeeting)) {
-                endTriggers += Trigger.TimeOfDay((start.h + 2) % 24, start.m, days)
+                endTriggers += com.mosman.routines.RoutineText.endAt(start.h, start.m, (start.h + 2) % 24, start.m, days)
                 questions += "I assumed it lasts 2 hours. Give an end time to change that."
             }
         } else {

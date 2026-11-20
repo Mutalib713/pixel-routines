@@ -13,6 +13,16 @@ object RoutineText {
         else -> "on any of ${ts.size} triggers"
     }
 
+    /**
+     * The end trigger for a start at [sh]:[sm] on [days] that ends at [eh]:[em]. When the end is
+     * at or before the start, it's overnight, so it ends on the NEXT day. Before this, "10pm to
+     * 6am on weekdays" ended at 6am on weekdays, so Friday night ran until Monday morning.
+     */
+    fun endAt(sh: Int, sm: Int, eh: Int, em: Int, days: Set<Int>): Trigger.TimeOfDay {
+        val overnight = eh * 60 + em <= sh * 60 + sm
+        return Trigger.TimeOfDay(eh, em, if (overnight) days.map { it % 7 + 1 }.toSet() else days)
+    }
+
     /** "At 08:00 on weekdays → Set ringer to silent", with long trigger lists counted. */
     fun oneLine(r: Routine): String =
         "${triggers(r.triggers).replaceFirstChar { it.uppercase() }} → ${r.thenSummary()}"
