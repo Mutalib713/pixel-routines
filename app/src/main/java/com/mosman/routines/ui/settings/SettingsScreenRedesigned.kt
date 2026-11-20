@@ -50,7 +50,7 @@ private object Shp {
 }
 
 private enum class Page(val title: String) {
-    MAIN("Settings"), APPEARANCE("Appearance"), PERMISSIONS("Permissions"), AI("Routine AI"),
+    MAIN("Settings"), APPEARANCE("Appearance"), PERMISSIONS("Permissions"), AI("Ask Routines"),
     BACKUP("Backup"), ADVANCED("Advanced"), ABOUT("About"),
 }
 
@@ -286,7 +286,7 @@ private fun LazyListScope.mainPage(
                 if (missing == 0) "Everything the app uses is allowed" else "What the app is allowed to do",
                 badge = if (missing > 0) "$missing needed" else null,
             ) { open(Page.PERMISSIONS) }
-            NavRow(Icons.Filled.AutoAwesome, "Routine AI", aiSummary) { open(Page.AI) }
+            NavRow(Icons.Filled.AutoAwesome, "Ask Routines", aiSummary) { open(Page.AI) }
         }
     }
     item {

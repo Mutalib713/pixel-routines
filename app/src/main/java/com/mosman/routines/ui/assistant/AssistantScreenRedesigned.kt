@@ -409,7 +409,7 @@ fun AssistantScreenRedesigned(
                 windowInsets = WindowInsets(0),
                 title = {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("Routine AI", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text("Ask Routines", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                         Text(mode.label(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 },
@@ -493,7 +493,7 @@ private fun EmptyChat(suggestions: List<String>, onPick: (String) -> Unit, modif
         modifier.fillMaxSize().verticalScroll(androidx.compose.foundation.rememberScrollState())
             .padding(horizontal = Sp.xl, vertical = Sp.xl),
     ) {
-        Text("What should your phone do?", style = MaterialTheme.typography.headlineMedium)
+        Text("New routine", style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(Sp.s))
         Text(
             "Say it in your own words, or add a picture or file with a time in it. You'll see the routine before anything changes.",
@@ -760,7 +760,7 @@ private fun Composer(
             TextField(
                 value = input,
                 onValueChange = onInput,
-                placeholder = { Text("Ask Routine AI") },
+                placeholder = { Text("Describe a routine") },
                 maxLines = 5,
                 textStyle = MaterialTheme.typography.bodyLarge,
                 colors = TextFieldDefaults.colors(

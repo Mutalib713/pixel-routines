@@ -111,7 +111,7 @@ fun HomeScreenRedesigned(
                 Row(Modifier.fillMaxWidth().padding(start = Sp.l, end = Sp.xs).heightIn(min = 52.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                     Spacer(Modifier.width(Sp.m))
-                    Text("Ask Routine AI", style = MaterialTheme.typography.bodyLarge,
+                    Text("Ask Routines", style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
                     IconButton(onClick = onNavigateToLens) {
                         Icon(Icons.Outlined.PhotoCamera, contentDescription = "Make a routine from a picture")
@@ -167,7 +167,7 @@ fun HomeScreenRedesigned(
         if (routines.isEmpty()) {
             item {
                 Text(
-                    "Nothing yet. Make one yourself, start from an idea, or just tell Routine AI what you want.",
+                    "Nothing yet. Make one yourself, start from an idea, or ask for one in your own words.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

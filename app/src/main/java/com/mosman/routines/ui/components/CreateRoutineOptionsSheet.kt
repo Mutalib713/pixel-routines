@@ -48,7 +48,7 @@ fun CreateRoutineOptionsSheet(
                 modifier = Modifier.padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 16.dp))
 
             Column(Modifier.clip(RoundedCornerShape(24.dp)), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Option(Icons.Outlined.AutoAwesome, "Ask Routine AI",
+                Option(Icons.Outlined.AutoAwesome, "Ask Routines",
                     "Describe it in your own words") { onDismiss(); onChatWithAi() }
                 Option(Icons.Outlined.DocumentScanner, "Scan a file or image",
                     "A photo, screenshot, PDF or text file") { onDismiss(); onFromImage() }
