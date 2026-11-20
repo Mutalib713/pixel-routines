@@ -30,7 +30,6 @@ import com.mosman.routines.ui.activity.ActivityScreenRedesigned
 import com.mosman.routines.ui.assistant.AssistantScreenRedesigned
 import com.mosman.routines.ui.components.CreateRoutineOptionsSheet
 import com.mosman.routines.ui.home.HomeScreenRedesigned
-import com.mosman.routines.ui.lens.RoutineLensScreen
 import com.mosman.routines.ui.routines.RoutinesScreenRedesigned
 import com.mosman.routines.ui.settings.SettingsScreenRedesigned
 import com.mosman.routines.ui.settings.VolumePanelSettingsScreen
@@ -45,7 +44,6 @@ sealed interface Screen {
     data object Discover : Screen
     data object Settings : Screen
     data object VolumePanelTriggers : Screen
-    data object Lens : Screen
     data class Edit(val routine: Routine) : Screen
 }
 
@@ -77,6 +75,7 @@ private fun AppRoot(tick: Int, refresh: () -> Unit) {
     var routines by remember { mutableStateOf(Store.load(ctx)) }
     val drafts = remember { mutableStateListOf<RoutineDraft>() }
     var showCreateOptions by remember { mutableStateOf(false) }
+    var pendingDelete by remember { mutableStateOf<Routine?>(null) }
     // "Scan / Image" opens the chat with its add sheet already up (layout L1).
     var openAttach by remember { mutableStateOf(false) }
     fun openPicture() { openAttach = true; screen = Screen.Assistant }
@@ -97,7 +96,6 @@ private fun AppRoot(tick: Int, refresh: () -> Unit) {
             is Screen.VolumePanelTriggers,
             is Screen.Discover,
             is Screen.Settings,
-            is Screen.Lens,
             is Screen.Routines,
             is Screen.Assistant -> Screen.Home
             else -> Screen.Home
@@ -159,7 +157,7 @@ private fun AppRoot(tick: Int, refresh: () -> Unit) {
                         Store.upsert(ctx, copy)
                         reload()
                     },
-                    onDeleteRoutine = { r -> Store.delete(ctx, r.id); reload() },
+                    onDeleteRoutine = { r -> pendingDelete = r },
                 )
 
                 is Screen.Routines -> RoutinesScreenRedesigned(
@@ -173,7 +171,7 @@ private fun AppRoot(tick: Int, refresh: () -> Unit) {
                         Store.upsert(ctx, copy)
                         reload()
                     },
-                    onDeleteRoutine = { r -> Store.delete(ctx, r.id); reload() },
+                    onDeleteRoutine = { r -> pendingDelete = r },
                     onOpenCreateOptions = { showCreateOptions = true },
                     onApproveDraft = { d ->
                         val result = DraftApprovalManager.approve(ctx, d)
@@ -233,22 +231,34 @@ private fun AppRoot(tick: Int, refresh: () -> Unit) {
                 // A tab now, so no back arrow.
                 is Screen.VolumePanelTriggers -> VolumePanelSettingsScreen(tick = tick, onBack = null)
 
-                is Screen.Lens -> RoutineLensScreen(
-                    onBack = { screen = Screen.Home },
-                    onDraftCreated = { d ->
-                        drafts.add(d)
-                        screen = Screen.Routines
-                    },
-                )
-
                 is Screen.Edit -> EditorScreen(
                     initial = s.routine,
                     onSave = { r -> Store.upsert(ctx, r); reload(); screen = Screen.Routines },
-                    onDelete = { r -> Store.delete(ctx, r.id); reload(); screen = Screen.Routines },
+                    onDelete = { r -> pendingDelete = r },
                     onBack = { screen = Screen.Routines },
                 )
             }
         }
+    }
+
+    // One confirmation for every Delete (routine menus and the editor). Deleting used to happen
+    // on a single tap with no way back.
+    pendingDelete?.let { r ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("Delete “${r.name.trim()}”?") },
+            text = {
+                Text(if (Store.isActive(ctx, r.id)) "It's running now. Deleting it ends it first and puts your settings back. This can't be undone."
+                    else "This can't be undone.")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    Store.delete(ctx, r.id); reload(); pendingDelete = null
+                    if (screen is Screen.Edit) screen = Screen.Routines
+                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("Keep it") } },
+        )
     }
 
     if (showCreateOptions) {

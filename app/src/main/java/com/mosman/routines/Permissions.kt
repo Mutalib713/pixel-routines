@@ -60,7 +60,7 @@ object Permissions {
 
     /** Whether a reminder can take over the screen, or would arrive as a plain notification. */
     fun hasFullScreen(ctx: Context): Boolean = runCatching {
-        ctx.getSystemService(NotificationManager::class.java).canUseFullScreenIntent()
+        Build.VERSION.SDK_INT < 34 || ctx.getSystemService(NotificationManager::class.java).canUseFullScreenIntent()
     }.getOrDefault(true)
 
     fun fullScreenSettings(ctx: Context) =

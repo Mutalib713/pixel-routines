@@ -62,7 +62,7 @@ object Reminders {
 
         // Say plainly when the alert had to fall back to an ordinary notification, rather
         // than logging success and leaving a missed reminder to be discovered later.
-        val allowed = runCatching { nm.canUseFullScreenIntent() }.getOrDefault(true)
+        val allowed = runCatching { android.os.Build.VERSION.SDK_INT < 34 || nm.canUseFullScreenIntent() }.getOrDefault(true)
         return if (allowed) "Reminded: $text"
         else "Reminded (notification only — full-screen not allowed): $text"
     }

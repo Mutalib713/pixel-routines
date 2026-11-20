@@ -45,11 +45,6 @@ import java.time.format.TextStyle as JTextStyle
 @Composable
 fun BackIcon() = Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
 
-enum class EditorMode(val label: String) {
-    BASIC("Basic"),
-    ADVANCED("Advanced"),
-}
-
 private enum class TriggerKind(val icon: String, val label: String, val sub: String) {
     TIME("schedule", "Time of day", "At a set time on chosen days"),
     SUN("sunny", "Sunrise / sunset", "Follows the sun, with an offset"),

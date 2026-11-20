@@ -139,3 +139,14 @@ object RoutineLensProcessor {
                 .addOnFailureListener { exception -> cont.resumeWithException(exception) }
         }
 }
+
+/**
+ * What to say when a picture holds text but no routine. Keeps the parser's timetable answer
+ * (it counts the class times it saw); otherwise says plainly what was found, with a short
+ * excerpt of the text so the user can see what was read.
+ */
+internal fun lensNoRoutineMessage(parserExplanation: String?, text: String): String {
+    if (parserExplanation != null && parserExplanation.startsWith("I read ")) return parserExplanation
+    val excerpt = text.lines().map { it.trim() }.filter { it.isNotBlank() }.take(3).joinToString(" · ").take(120)
+    return "I found text but no time or schedule to build a routine from. It said: “$excerpt”."
+}
