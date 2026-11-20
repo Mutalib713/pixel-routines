@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.outlined.Add
@@ -477,9 +478,10 @@ fun AssistantScreenRedesigned(
 
 @Composable
 private fun EmptyChat(suggestions: List<String>, onPick: (String) -> Unit, modifier: Modifier = Modifier) {
+    // Scrolls, so the tiles stay whole when the keyboard takes half the screen (seen on the Pixel).
     Column(
-        modifier.fillMaxSize().padding(horizontal = Sp.xl),
-        verticalArrangement = Arrangement.Center,
+        modifier.fillMaxSize().verticalScroll(androidx.compose.foundation.rememberScrollState())
+            .padding(horizontal = Sp.xl, vertical = Sp.xl),
     ) {
         Text("What should your phone do?", style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(Sp.s))
