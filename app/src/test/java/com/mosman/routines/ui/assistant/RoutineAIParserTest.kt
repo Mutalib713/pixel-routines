@@ -183,6 +183,25 @@ class RoutineAIParserTest {
 
     // ---- Photos ----
 
+    @Test fun randomPhotoText_neverBecomesARoutine() {
+        // A random photo still has stray text in it: brand names, numbers, signs.
+        listOf(
+            "SAMSUNG\nGalaxy\n5G",
+            "EXIT\n3",
+            "MTN\n024 455 1234",
+            "Shoprite\nTotal 45.50\n12/11/2026",
+            "2",
+        ).forEach { ocr ->
+            val r = RoutineAIParser.parse("", extractedOcrText = ocr)
+            assertNull("made a routine from: $ocr", r.draft)
+        }
+    }
+
+    @Test fun lensMessage_showsWhatWasRead() {
+        val m = com.mosman.routines.ui.lens.lensNoRoutineMessage("I couldn't tell what you'd like.", "SAMSUNG\nGalaxy\n5G")
+        assertTrue(m, m.contains("no time or schedule") && m.contains("SAMSUNG"))
+    }
+
     @Test fun timetableWithSeveralClassTimes_isNotCollapsedIntoOneRoutine() {
         val ocr = """
             KNUST BIT 1 TIMETABLE 2026

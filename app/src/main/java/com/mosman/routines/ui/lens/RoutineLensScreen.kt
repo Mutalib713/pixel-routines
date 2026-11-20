@@ -39,9 +39,21 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import com.mosman.routines.drafts.RoutineDraft
+import com.mosman.routines.ui.assistant.RoutineAIParser
 import com.mosman.routines.ui.components.RoutineProposalCard
 import kotlinx.coroutines.launch
 import java.io.File
+
+/**
+ * What to say when a picture holds text but no routine. Keeps the parser's timetable answer
+ * (it counts the class times it saw); otherwise says plainly what was found, with a short
+ * excerpt of the text so the user can see what was read.
+ */
+internal fun lensNoRoutineMessage(parserExplanation: String?, text: String): String {
+    if (parserExplanation != null && parserExplanation.startsWith("I read ")) return parserExplanation
+    val excerpt = text.lines().map { it.trim() }.filter { it.isNotBlank() }.take(3).joinToString(" · ").take(120)
+    return "I found text but no time or schedule to build a routine from. It said: “$excerpt”."
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -84,12 +96,17 @@ fun RoutineLensScreen(
         errorMessage = null
 
         scope.launch {
-            val result = RoutineLensProcessor.processImageUri(context, uri)
+            // Same reader and rules as the chat: no time or schedule in the picture, no routine.
+            val read = RoutineLensProcessor.recognizeUri(context, uri)
+            val text = read.getOrNull()
+            val parsed = if (text.isNullOrBlank()) null
+                else RoutineAIParser.parse("", text, com.mosman.routines.Store.load(context))
             isProcessing = false
-            result.onSuccess { draft ->
-                detectedDraft = draft
-            }.onFailure { err ->
-                errorMessage = err.localizedMessage ?: "Failed to read timetable text."
+            when {
+                read.isFailure -> errorMessage = "I couldn't read it: ${read.exceptionOrNull()?.message ?: "unknown error"}."
+                text.isNullOrBlank() -> errorMessage = "I didn't find any text in this picture."
+                parsed?.draft != null -> detectedDraft = parsed.draft
+                else -> errorMessage = lensNoRoutineMessage(parsed?.explanation, text)
             }
         }
     }
@@ -132,7 +149,7 @@ fun RoutineLensScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Routine Lens", fontWeight = FontWeight.Bold) },
+                title = { Text("From a picture", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -205,12 +222,12 @@ fun RoutineLensScreen(
                         )
                         Column {
                             Text(
-                                "Scanning timetable…",
+                                "Reading the picture…",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 15.sp,
                             )
                             Text(
-                                "On-device text recognition reading schedule",
+                                "Text is read on your phone",
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -228,7 +245,7 @@ fun RoutineLensScreen(
                 ) {
                     Column(Modifier.padding(16.dp)) {
                         Text(
-                            text = "Could not detect schedule",
+                            text = "No routine in this one",
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onErrorContainer,
                             fontSize = 14.sp,
@@ -246,7 +263,7 @@ fun RoutineLensScreen(
             // Detected Routine Proposal
             if (detectedDraft != null && !isProcessing) {
                 Text(
-                    text = "Routine Proposed",
+                    text = "Here's the routine I found",
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp,
                     color = MaterialTheme.colorScheme.primary,
@@ -301,13 +318,13 @@ fun RoutineLensScreen(
                         }
                         Spacer(Modifier.height(14.dp))
                         Text(
-                            text = "Scan or Import Timetable",
+                            text = "Make a routine from a picture",
                             fontWeight = FontWeight.Bold,
                             fontSize = 17.sp,
                         )
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            text = "Take a photo of your lecture schedule, shift roster, or exam timetable to create an automated routine.",
+                            text = "Take a photo or choose an image with a time on it, like a class, shift or event, and I'll suggest a routine.",
                             fontSize = 13.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center,
@@ -328,7 +345,7 @@ fun RoutineLensScreen(
                 ) {
                     Icon(Icons.Filled.CameraAlt, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Take Photo")
+                    Text("Take photo")
                 }
 
                 OutlinedButton(
@@ -342,7 +359,7 @@ fun RoutineLensScreen(
                 ) {
                     Icon(Icons.Filled.PhotoLibrary, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Upload Image")
+                    Text("Choose image")
                 }
             }
         }
