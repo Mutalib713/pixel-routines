@@ -1,34 +1,43 @@
 package com.mosman.routines.ui.settings
 
-import android.os.Build
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.automirrored.filled.VolumeOff
-import androidx.compose.material.icons.automirrored.filled.VolumeUp
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.outlined.VolumeUp
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import com.mosman.routines.GestureType
+import com.mosman.routines.Ic
 import com.mosman.routines.Permissions
+import com.mosman.routines.Routine
+import com.mosman.routines.Store
+import com.mosman.routines.Trigger
 import com.mosman.routines.volume.*
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
+/**
+ * Controls: one place for every gesture and on-screen button, each doing the job you pick.
+ *
+ * Layout picked 2026-11-20 ("A + B combined"): a Pixel-Settings-style list (A) where a gesture
+ * that's switched on opens its job chips underneath (B), so what each gesture does is visible
+ * without opening anything. Tapping a chip opens a sheet of jobs. Before this, the screen was
+ * volume-panel only ("Physical Button Alternative"), so users didn't know gestures could do more.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VolumePanelSettingsScreen(
@@ -42,809 +51,455 @@ fun VolumePanelSettingsScreen(
 
     var settings by remember { mutableStateOf(VolumePanelStore.load(ctx)) }
     var hasOverlay by remember { mutableStateOf(Permissions.hasOverlay(ctx)) }
-    // tick bumps on every resume, so the warning card clears as soon as the user comes back
-    // from granting "Display over other apps".
     LaunchedEffect(tick) { hasOverlay = Permissions.hasOverlay(ctx) }
+    val routines = remember(tick) { Store.load(ctx) }
 
-    fun updateSettings(transform: (VolumePanelSettings) -> VolumePanelSettings) {
-        val updated = transform(settings)
-        settings = updated
-        VolumePanelStore.save(ctx, updated)
+    fun update(transform: (VolumePanelSettings) -> VolumePanelSettings) {
+        settings = transform(settings)
+        VolumePanelStore.save(ctx, settings)
     }
+
+    /** Switching on something that draws over other apps sends you to grant that first. */
+    fun needsOverlay(on: Boolean) {
+        hasOverlay = Permissions.hasOverlay(ctx)
+        if (on && !hasOverlay) ctx.startActivity(Permissions.overlaySettings(ctx))
+    }
+
+    var picking by remember { mutableStateOf<JobPick?>(null) }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
-            TopAppBar(
-                title = { Text("Controls", fontWeight = FontWeight.Bold) },
+            if (onBack != null) TopAppBar(
+                title = { Text("Controls") },
                 navigationIcon = {
-                    if (onBack != null) IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
+                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
                 },
             )
         },
+        contentWindowInsets = WindowInsets(0),
     ) { pad ->
         LazyColumn(
-            modifier = modifier
-                .fillMaxSize()
-                .padding(pad),
-            contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 8.dp, bottom = 48.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            modifier.fillMaxSize().padding(pad),
+            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 32.dp),
         ) {
-            // Hero Intro Card
+            if (onBack == null) item {
+                Column(Modifier.padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 4.dp)) {
+                    Text("Controls", style = MaterialTheme.typography.displaySmall)
+                    Spacer(Modifier.height(4.dp))
+                    Text("Gestures and buttons that work anywhere on your phone.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+
+            val overlayUsed = settings.swipeEnabled || settings.floatingButtonEnabled
+            if (overlayUsed && !hasOverlay) item {
+                Notice(
+                    "Swipe and the floating button need “Display over other apps”.",
+                    "Allow",
+                ) { ctx.startActivity(Permissions.overlaySettings(ctx)) }
+            }
+
+            // ---------------- Gestures
+            item { SectionLabel("Gestures") }
             item {
-                Card(
-                    shape = RoundedCornerShape(24.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Column(Modifier.padding(18.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(46.dp)
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.primary),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.VolumeUp,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onPrimary,
-                                    modifier = Modifier.size(24.dp),
-                                )
-                            }
-                            Spacer(Modifier.width(14.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    "Physical Button Alternative",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 16.sp,
-                                )
-                                Spacer(Modifier.height(2.dp))
-                                Text(
-                                    "Open volume controls via gestures or on-screen shortcuts.",
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    lineHeight = 16.sp,
-                                )
+                Group {
+                    GestureRow(
+                        Icons.Outlined.Vibration, "Shake", sensitivityText(settings.shakeSensitivity),
+                        settings.shakeEnabled, { on -> update { it.copy(shakeEnabled = on) } },
+                    ) {
+                        JobLine("Does", settings.shakeJob, routines) {
+                            picking = JobPick("Shake", settings.shakeJob) { j -> update { it.copy(shakeJob = j) } }
+                        }
+                        SensitivityChips(settings.shakeSensitivity) { v -> update { it.copy(shakeSensitivity = v) } }
+                        AlsoUsedBy(routines, "Shake") { it is Trigger.Gesture && it.type == GestureType.SHAKE }
+                    }
+                    GestureRow(
+                        Icons.Outlined.TouchApp, "Double-tap the back",
+                        "${sensitivityText(settings.backTapSensitivity)} · may miss light taps",
+                        settings.backTapEnabled, { on -> update { it.copy(backTapEnabled = on) } },
+                    ) {
+                        JobLine("Does", settings.backTapJob, routines) {
+                            picking = JobPick("Double-tap the back", settings.backTapJob) { j -> update { it.copy(backTapJob = j) } }
+                        }
+                        SensitivityChips(settings.backTapSensitivity) { v -> update { it.copy(backTapSensitivity = v) } }
+                        AlsoUsedBy(routines, "double-tap") { it is Trigger.Gesture && it.type == GestureType.BACK_TAP }
+                    }
+                    GestureRow(
+                        Icons.Outlined.Flip, "Flip face down", "When the phone is placed screen-down",
+                        settings.flipEnabled, { on -> update { it.copy(flipEnabled = on) } },
+                    ) {
+                        JobLine("Does", settings.flipJob, routines) {
+                            picking = JobPick("Flip face down", settings.flipJob) { j -> update { it.copy(flipJob = j) } }
+                        }
+                        AlsoUsedBy(routines, "face-down") { it is Trigger.Gesture && it.type == GestureType.FLIP_DOWN }
+                    }
+                    GestureRow(
+                        Icons.Outlined.Swipe, "Swipe in from the edge", settings.swipeDirection.shortLabel(),
+                        settings.swipeEnabled, { on -> needsOverlay(on); update { it.copy(swipeEnabled = on) } },
+                    ) {
+                        JobLine("Does", settings.swipeJob, routines) {
+                            picking = JobPick("Swipe in", settings.swipeJob) { j -> update { it.copy(swipeJob = j) } }
+                        }
+                        ChipRow("Edge") {
+                            SwipeDirection.entries.forEach { d ->
+                                FilterChip(selected = settings.swipeDirection == d,
+                                    onClick = { update { it.copy(swipeDirection = d) } },
+                                    label = { Text(d.shortLabel().removeSuffix(" edge")) })
                             }
                         }
+                        AlsoUsedBy(routines, "this edge") { it is Trigger.Swipe && it.direction == settings.swipeDirection }
+                    }
+                }
+            }
 
-                        Spacer(Modifier.height(14.dp))
-                        FilledTonalButton(
-                            onClick = {
-                                val ok = VolumePanelController.show(ctx, ignoreCooldown = true)
-                                scope.launch {
-                                    snackbar.showSnackbar(
-                                        if (ok) "System volume panel opened"
-                                        else "Could not open volume panel"
-                                    )
-                                }
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Icon(Icons.Filled.PlayArrow, contentDescription = null, Modifier.size(16.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("Test Volume Panel Now")
+            // ---------------- On screen
+            item { SectionLabel("On screen") }
+            item {
+                Group {
+                    GestureRow(
+                        Icons.Outlined.RadioButtonChecked, "Floating button",
+                        "${settings.floatingButtonSize.name.lowercase().replaceFirstChar { it.uppercase() }} · " +
+                            "${(settings.floatingButtonOpacity * 100).roundToInt()}% visible",
+                        settings.floatingButtonEnabled,
+                        { on -> needsOverlay(on); update { it.copy(floatingButtonEnabled = on) } },
+                    ) {
+                        JobLine("Tap", settings.floatingTapJob, routines) {
+                            picking = JobPick("Tapping the button", settings.floatingTapJob) { j -> update { it.copy(floatingTapJob = j) } }
+                        }
+                        val dbl = ControlJob(settings.floatingDoubleTapAction, settings.floatingDoubleTapRoutineId)
+                        JobLine("Double-tap", dbl, routines) {
+                            picking = JobPick("Double-tapping the button", dbl) { j ->
+                                update { it.copy(floatingDoubleTapAction = j.action, floatingDoubleTapRoutineId = j.routineId) }
+                            }
+                        }
+                        val hold = ControlJob(settings.floatingLongPressAction, settings.floatingLongPressRoutineId)
+                        JobLine("Hold", hold, routines) {
+                            picking = JobPick("Holding the button", hold) { j ->
+                                update { it.copy(floatingLongPressAction = j.action, floatingLongPressRoutineId = j.routineId) }
+                            }
+                        }
+                        ChipRow("Size") {
+                            ButtonSize.entries.forEach { s ->
+                                FilterChip(selected = settings.floatingButtonSize == s,
+                                    onClick = { update { it.copy(floatingButtonSize = s) } },
+                                    label = { Text(s.name.lowercase().replaceFirstChar { it.uppercase() }) })
+                            }
+                        }
+                        Text("How visible: ${(settings.floatingButtonOpacity * 100).roundToInt()}%",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Slider(value = settings.floatingButtonOpacity,
+                            onValueChange = { v -> update { it.copy(floatingButtonOpacity = v) } },
+                            valueRange = 0.3f..1f)
+                        TextButton(onClick = { update { it.copy(floatingButtonX = -1, floatingButtonY = -1) } },
+                            contentPadding = PaddingValues(horizontal = 0.dp)) {
+                            Text("Move it back to the side")
                         }
                     }
                 }
             }
 
-            // Section Header: Activation Methods
-            item {
-                SettingsSectionHeader("Activation Methods")
-            }
-
-            // Trigger 1: Shake Phone Card
-            item {
-                TriggerCard(
-                    icon = Icons.Filled.Vibration,
-                    title = "Shake Phone",
-                    subtitle = "Deliberately shake your phone twice to open the volume controls.",
-                    enabled = settings.shakeEnabled,
-                    onEnabledChange = { on ->
-                        updateSettings { it.copy(shakeEnabled = on) }
-                    },
-                    onTest = {
-                        val ok = VolumePanelController.show(ctx, ignoreCooldown = true)
-                        scope.launch {
-                            snackbar.showSnackbar(
-                                if (ok) "Shake trigger tested successfully"
-                                else "Test could not show volume panel"
-                            )
-                        }
-                    },
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("Sensitivity", fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                            Sensitivity.entries.forEachIndexed { i, s ->
-                                SegmentedButton(
-                                    selected = settings.shakeSensitivity == s,
-                                    onClick = { updateSettings { it.copy(shakeSensitivity = s) } },
-                                    shape = SegmentedButtonDefaults.itemShape(i, Sensitivity.entries.size),
-                                ) {
-                                    Text(s.label(), fontSize = 12.sp)
-                                }
-                            }
-                        }
-                        Text(
-                            text = when (settings.shakeSensitivity) {
-                                Sensitivity.LOW -> "Requires firm, deliberate shaking. Best against false triggers."
-                                Sensitivity.MEDIUM -> "Balanced for daily usage."
-                                Sensitivity.HIGH -> "Responds to lighter shaking."
-                            },
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-
-            // Trigger 2: Double-Tap Back Card
-            item {
-                TriggerCard(
-                    icon = Icons.Filled.TouchApp,
-                    title = "Double-Tap Back",
-                    subtitle = "Quickly tap the back of your phone twice to show volume controls.",
-                    badge = "Experimental",
-                    enabled = settings.backTapEnabled,
-                    onEnabledChange = { on ->
-                        updateSettings { it.copy(backTapEnabled = on) }
-                    },
-                    onTest = {
-                        val ok = VolumePanelController.show(ctx, ignoreCooldown = true)
-                        scope.launch {
-                            snackbar.showSnackbar(
-                                if (ok) "Double-tap back trigger tested successfully"
-                                else "Test could not show volume panel"
-                            )
-                        }
-                    },
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("Sensitivity", fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                            Sensitivity.entries.forEachIndexed { i, s ->
-                                SegmentedButton(
-                                    selected = settings.backTapSensitivity == s,
-                                    onClick = { updateSettings { it.copy(backTapSensitivity = s) } },
-                                    shape = SegmentedButtonDefaults.itemShape(i, Sensitivity.entries.size),
-                                ) {
-                                    Text(s.label(), fontSize = 12.sp)
-                                }
-                            }
-                        }
-
-                        // Informative limitation notice
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                                .padding(12.dp),
-                        ) {
-                            Row(verticalAlignment = Alignment.Top) {
-                                Icon(
-                                    Icons.Filled.Info,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(16.dp).padding(top = 1.dp),
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    "Custom motion sensor detector. Designed for Pixel 6 Pro. Thick cases or heavy phone movement may impact detection consistency.",
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    lineHeight = 15.sp,
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Trigger 3: Swipe Gesture Card
-            item {
-                TriggerCard(
-                    icon = Icons.Filled.Swipe,
-                    title = "Swipe Gesture",
-                    subtitle = "Swipe inward from your chosen screen edge to open volume controls.",
-                    enabled = settings.swipeEnabled,
-                    onEnabledChange = { on ->
-                        hasOverlay = Permissions.hasOverlay(ctx)
-                        if (on && !hasOverlay) {
-                            ctx.startActivity(Permissions.overlaySettings(ctx))
-                        }
-                        updateSettings { it.copy(swipeEnabled = on) }
-                    },
-                    onTest = {
-                        val ok = VolumePanelController.show(ctx, ignoreCooldown = true)
-                        scope.launch {
-                            snackbar.showSnackbar(
-                                if (ok) "Swipe gesture tested successfully"
-                                else "Test could not show volume panel"
-                            )
-                        }
-                    },
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        if (!hasOverlay) {
-                            OverlayPermissionWarning {
-                                ctx.startActivity(Permissions.overlaySettings(ctx))
-                            }
-                        }
-
-                        Text("Swipe Direction", fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            SwipeDirection.entries.forEach { dir ->
-                                FilterChip(
-                                    selected = settings.swipeDirection == dir,
-                                    onClick = { updateSettings { it.copy(swipeDirection = dir) } },
-                                    label = { Text(dir.label(), fontSize = 12.sp) },
-                                    leadingIcon = {
-                                        Icon(
-                                            imageVector = when (dir) {
-                                                SwipeDirection.LEFT -> Icons.AutoMirrored.Filled.ArrowForward
-                                                SwipeDirection.RIGHT -> Icons.AutoMirrored.Filled.ArrowBack
-                                                SwipeDirection.TOP -> Icons.Filled.ArrowDownward
-                                                SwipeDirection.BOTTOM -> Icons.Filled.ArrowUpward
-                                            },
-                                            contentDescription = null,
-                                            modifier = Modifier.size(16.dp),
-                                        )
-                                    },
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-                            }
-                        }
-                        Text(
-                            "A thin strip on that edge listens for an inward swipe. On the left and right edges, Back still works above and below the strip.",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-
-            // Trigger 4: Floating Volume Button Card
-            item {
-                TriggerCard(
-                    icon = Icons.Filled.ControlPoint,
-                    title = "Floating Button",
-                    subtitle = "A movable floating shortcut button that stays over applications.",
-                    enabled = settings.floatingButtonEnabled,
-                    onEnabledChange = { on ->
-                        hasOverlay = Permissions.hasOverlay(ctx)
-                        if (on && !hasOverlay) {
-                            ctx.startActivity(Permissions.overlaySettings(ctx))
-                        }
-                        updateSettings { it.copy(floatingButtonEnabled = on) }
-                    },
-                    onTest = {
-                        val ok = VolumePanelController.show(ctx, ignoreCooldown = true)
-                        scope.launch {
-                            snackbar.showSnackbar(
-                                if (ok) "Floating button tested successfully"
-                                else "Test could not show volume panel"
-                            )
-                        }
-                    },
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                        if (!hasOverlay) {
-                            OverlayPermissionWarning {
-                                ctx.startActivity(Permissions.overlaySettings(ctx))
-                            }
-                        }
-
-                        // Size Selector
-                        Text("Button Size", fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                            ButtonSize.entries.forEachIndexed { i, s ->
-                                SegmentedButton(
-                                    selected = settings.floatingButtonSize == s,
-                                    onClick = { updateSettings { it.copy(floatingButtonSize = s) } },
-                                    shape = SegmentedButtonDefaults.itemShape(i, ButtonSize.entries.size),
-                                ) {
-                                    Text(s.name.lowercase().replaceFirstChar { it.uppercase() }, fontSize = 12.sp)
-                                }
-                            }
-                        }
-
-                        // Opacity Slider
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                "Opacity",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium,
-                                modifier = Modifier.weight(1f),
-                            )
-                            Text(
-                                "${(settings.floatingButtonOpacity * 100).roundToInt()}%",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary,
-                            )
-                        }
-                        Slider(
-                            value = settings.floatingButtonOpacity,
-                            onValueChange = { updateSettings { s -> s.copy(floatingButtonOpacity = it) } },
-                            valueRange = 0.20f..1.0f,
-                            steps = 7,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-
-                        // Gestures & Shortcuts Header
-                        Text("Gestures & Actions", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text("Single tap", fontSize = 13.sp, modifier = Modifier.weight(1f))
-                            Text(
-                                "Open Volume Panel",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.primary,
-                            )
-                        }
-
-                        // Double-tap Action
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("Double tap", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                listOf(FloatingAction.VOLUME_DOWN, FloatingAction.VOLUME_UP, FloatingAction.NONE).forEach { act ->
-                                    FilterChip(
-                                        selected = settings.floatingDoubleTapAction == act,
-                                        onClick = { updateSettings { it.copy(floatingDoubleTapAction = act) } },
-                                        label = { Text(act.label(), fontSize = 11.sp) },
-                                    )
-                                }
-                            }
-                        }
-
-                        // Long-press Action
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("Long press", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                listOf(FloatingAction.VOLUME_UP, FloatingAction.VOLUME_DOWN, FloatingAction.NONE).forEach { act ->
-                                    FilterChip(
-                                        selected = settings.floatingLongPressAction == act,
-                                        onClick = { updateSettings { it.copy(floatingLongPressAction = act) } },
-                                        label = { Text(act.label(), fontSize = 11.sp) },
-                                    )
-                                }
-                            }
-                        }
-
-                        Spacer(Modifier.height(4.dp))
-
-                        // Position Reset Action
-                        OutlinedButton(
-                            onClick = {
-                                updateSettings { it.copy(floatingButtonX = -1, floatingButtonY = -1) }
-                                scope.launch { snackbar.showSnackbar("Floating button position reset to edge") }
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Icon(Icons.Filled.Refresh, contentDescription = null, Modifier.size(16.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("Reset Button Position to Default")
-                        }
-                    }
-                }
-            }
-
-            // Unmute WhatsApp statuses
+            // ---------------- Apps
+            item { SectionLabel("Apps") }
             item {
                 val hasUsage = remember(tick) { Permissions.hasUsageAccess(ctx) }
                 val shizukuReady = remember(tick) { com.mosman.routines.ShizukuBridge.ready }
                 val shizukuStatus = remember(tick) { com.mosman.routines.ShizukuBridge.status(ctx) }
                 val last = remember(tick, settings) { StatusUnmute.lastResult(ctx) }
-                TriggerCard(
-                    icon = Icons.AutoMirrored.Filled.VolumeOff,
-                    title = "Unmute WhatsApp statuses",
-                    subtitle = "On Vibrate or Silent, WhatsApp plays statuses muted. This presses volume-up for you when one opens.",
-                    badge = "Shizuku",
-                    enabled = settings.statusUnmuteEnabled,
-                    onEnabledChange = { on ->
-                        if (on && !Permissions.hasUsageAccess(ctx)) {
-                            ctx.startActivity(Permissions.usageAccessSettings())
+                Group {
+                    GestureRow(
+                        Icons.AutoMirrored.Outlined.VolumeUp, "Unmute WhatsApp statuses",
+                        if (shizukuReady) "Presses volume-up when a muted status opens" else "Needs Shizuku · $shizukuStatus",
+                        settings.statusUnmuteEnabled,
+                        { on ->
+                            if (on && !Permissions.hasUsageAccess(ctx)) ctx.startActivity(Permissions.usageAccessSettings())
+                            update { it.copy(statusUnmuteEnabled = on) }
+                        },
+                    ) {
+                        Requirement("Usage access", if (hasUsage) "Allowed" else "Needed to see when a status opens",
+                            hasUsage, if (hasUsage) null else "Allow") { ctx.startActivity(Permissions.usageAccessSettings()) }
+                        Requirement("Shizuku", shizukuStatus, shizukuReady, if (shizukuReady) null else "Open") {
+                            val sb = com.mosman.routines.ShizukuBridge
+                            if (sb.running && !sb.granted) sb.requestPermission() else sb.openShizuku(ctx)
                         }
-                        updateSettings { it.copy(statusUnmuteEnabled = on) }
-                    },
-                    onTest = {
-                        scope.launch {
-                            val failure = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                com.mosman.routines.ShizukuBridge.pressKeys(
-                                    ctx, android.view.KeyEvent.KEYCODE_VOLUME_UP,
-                                )
+                        SwitchLine("Keep the volume level", "Also presses volume-down straight after. Not yet tried on WhatsApp.",
+                            settings.statusUnmuteKeepLevel) { on -> update { it.copy(statusUnmuteKeepLevel = on) } }
+                        if (last != null) Text("Last: $last", style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        OutlinedButton(onClick = {
+                            scope.launch {
+                                val failure = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    com.mosman.routines.ShizukuBridge.pressKeys(ctx, android.view.KeyEvent.KEYCODE_VOLUME_UP)
+                                }
+                                snackbar.showSnackbar(failure ?: "Shizuku pressed volume-up. The volume panel should appear.")
                             }
-                            snackbar.showSnackbar(
-                                // Outside WhatsApp, Android's first press only opens the volume
-                                // panel; it doesn't change the level (seen on the emulator).
-                                failure ?: "Shizuku pressed volume-up. The volume panel should appear."
-                            )
-                        }
-                    },
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        RequirementRow(
-                            label = "Usage access",
-                            status = if (hasUsage) "Allowed" else "Needed to see when a status opens",
-                            ok = hasUsage,
-                            action = if (hasUsage) null else "Allow",
-                            onAction = { ctx.startActivity(Permissions.usageAccessSettings()) },
-                        )
-                        RequirementRow(
-                            label = "Shizuku",
-                            status = shizukuStatus,
-                            ok = shizukuReady,
-                            action = if (shizukuReady) null else "Open",
-                            onAction = {
-                                val sb = com.mosman.routines.ShizukuBridge
-                                if (sb.running && !sb.granted) sb.requestPermission() else sb.openShizuku(ctx)
-                            },
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text("Keep volume level", fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                                Text(
-                                    "Also presses volume-down straight after. Not yet tried on WhatsApp.",
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            Switch(
-                                checked = settings.statusUnmuteKeepLevel,
-                                onCheckedChange = { on -> updateSettings { it.copy(statusUnmuteKeepLevel = on) } },
-                            )
-                        }
-                        if (last != null) {
-                            Text(
-                                "Last: $last",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+                        }) { Text("Test it") }
                     }
                 }
             }
 
-            // Section Header: General Configuration
+            // ---------------- General
+            item { SectionLabel("General") }
             item {
-                SettingsSectionHeader("General Preferences")
-            }
-
-            // General Settings Card
-            item {
-                Card(
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(20.dp)),
-                ) {
-                    Column(
-                        Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                    ) {
-                        // Cooldown Setting
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Column(Modifier.weight(1f)) {
-                                    Text("Trigger Cooldown", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                                    Text(
-                                        "Minimum delay between volume panel activations",
-                                        fontSize = 12.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
+                Group {
+                    PlainRow {
+                        SwitchLine("Only when the screen is on", "Stops gestures firing in a pocket",
+                            settings.screenOnOnly) { on -> update { it.copy(screenOnOnly = on) } }
+                    }
+                    PlainRow {
+                        SwitchLine("Vibrate when used", "A short click so you know it worked",
+                            settings.hapticFeedbackEnabled) { on -> update { it.copy(hapticFeedbackEnabled = on) } }
+                    }
+                    PlainRow {
+                        SwitchLine("Keep Silent and Vibrate", "Routines that end won't switch the sound back on if you muted the phone yourself",
+                            settings.preserveSilentVibrate) { on -> update { it.copy(preserveSilentVibrate = on) } }
+                    }
+                    PlainRow {
+                        Column {
+                            Text("Wait between uses", style = MaterialTheme.typography.bodyLarge)
+                            Text("So one shake doesn't fire twice", style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.height(6.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                listOf(1000L to "1 s", 1500L to "1.5 s", 2000L to "2 s", 3000L to "3 s").forEach { (ms, label) ->
+                                    FilterChip(selected = settings.cooldownDurationMs == ms,
+                                        onClick = { update { it.copy(cooldownDurationMs = ms) } },
+                                        label = { Text(label) })
                                 }
                             }
-                            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                                listOf(1000L to "1.0s", 1500L to "1.5s", 2000L to "2.0s", 3000L to "3.0s")
-                                    .forEachIndexed { i, (duration, label) ->
-                                        SegmentedButton(
-                                            selected = settings.cooldownDurationMs == duration,
-                                            onClick = { updateSettings { it.copy(cooldownDurationMs = duration) } },
-                                            shape = SegmentedButtonDefaults.itemShape(i, 4),
-                                        ) {
-                                            Text(label, fontSize = 12.sp)
-                                        }
-                                    }
-                            }
-                        }
-
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
-
-                        // Screen-On Only Toggle
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text("Only When Screen is On", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                                Spacer(Modifier.height(2.dp))
-                                Text(
-                                    "Prevents gestures from firing inside pockets or while device sleeps",
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            Switch(
-                                checked = settings.screenOnOnly,
-                                onCheckedChange = { updateSettings { s -> s.copy(screenOnOnly = it) } },
-                            )
-                        }
-
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
-
-                        // Haptic Feedback Toggle
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text("Haptic Feedback", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                                Spacer(Modifier.height(2.dp))
-                                Text(
-                                    "Provide a subtle click vibration when volume controls open",
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            Switch(
-                                checked = settings.hapticFeedbackEnabled,
-                                onCheckedChange = { updateSettings { s -> s.copy(hapticFeedbackEnabled = it) } },
-                            )
-                        }
-
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-
-                        // Preserve Silent & Vibrate Toggle (Ringer Guard)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text("Preserve Silent & Vibrate", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                                Spacer(Modifier.height(2.dp))
-                                Text(
-                                    "Prevent background routines or snapshot restores from un-muting your phone",
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            Switch(
-                                checked = settings.preserveSilentVibrate,
-                                onCheckedChange = { updateSettings { s -> s.copy(preserveSilentVibrate = it) } },
-                            )
                         }
                     }
                 }
             }
         }
     }
+
+    picking?.let { p ->
+        JobSheet(p, routines, onDismiss = { picking = null }) { job -> p.onPick(job); picking = null }
+    }
+}
+
+// ============================================================================
+//  Pieces
+// ============================================================================
+
+private class JobPick(val what: String, val current: ControlJob, val onPick: (ControlJob) -> Unit)
+
+private fun sensitivityText(s: Sensitivity) = "${s.label()} sensitivity"
+
+@Composable
+private fun SectionLabel(text: String) {
+    Text(text, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 8.dp, top = 20.dp, bottom = 8.dp))
+}
+
+/** Rounded group of rows with thin gaps, like Pixel Settings. */
+@Composable
+private fun Group(content: @Composable ColumnScope.() -> Unit) {
+    Column(Modifier.clip(RoundedCornerShape(24.dp)), verticalArrangement = Arrangement.spacedBy(2.dp), content = content)
 }
 
 @Composable
-private fun SettingsSectionHeader(title: String) {
-    Text(
-        text = title,
-        fontSize = 14.sp,
-        fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 4.dp, bottom = 2.dp),
-    )
+private fun PlainRow(content: @Composable () -> Unit) {
+    Box(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainer)
+        .padding(horizontal = 16.dp, vertical = 12.dp)) { content() }
 }
 
+/** One gesture: icon, name, a line under it, a switch. On = its details open underneath. */
 @Composable
-private fun TriggerCard(
-    icon: ImageVector,
-    title: String,
-    subtitle: String,
-    enabled: Boolean,
-    onEnabledChange: (Boolean) -> Unit,
-    onTest: () -> Unit,
-    badge: String? = null,
-    content: @Composable ColumnScope.() -> Unit,
+private fun GestureRow(
+    icon: ImageVector, title: String, subtitle: String,
+    on: Boolean, onToggle: (Boolean) -> Unit,
+    details: @Composable ColumnScope.() -> Unit,
 ) {
-    Card(
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (enabled) MaterialTheme.colorScheme.surface
-            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-        ),
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(
-                width = 1.dp,
-                color = if (enabled) MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
-                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
-                shape = RoundedCornerShape(20.dp),
-            ),
-    ) {
-        Column(
-            Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainer)) {
+        Row(
+            Modifier.fillMaxWidth().clickable { onToggle(!on) }.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Header Row: Icon, Title, Badge, Switch
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (enabled) MaterialTheme.colorScheme.primaryContainer
-                            else MaterialTheme.colorScheme.surfaceVariant
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = if (enabled) MaterialTheme.colorScheme.onPrimaryContainer
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-
-                Spacer(Modifier.width(12.dp))
-
-                Column(Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        // The title may wrap, but it must leave room for the tag: before, a long
-                        // title squeezed "Shizuku" into one letter-column ("Shi / zu / ku").
-                        Text(
-                            title,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
-                            modifier = Modifier.weight(1f, fill = false),
-                        )
-                        if (badge != null) {
-                            Spacer(Modifier.width(6.dp))
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(Color(0xFFEAB308).copy(alpha = 0.18f))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp),
-                            ) {
-                                Text(
-                                    badge,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFFCA8A04),
-                                    maxLines = 1,
-                                    softWrap = false,
-                                )
-                            }
-                        }
-                    }
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        subtitle,
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        lineHeight = 16.sp,
-                    )
-                }
-
-                Spacer(Modifier.width(8.dp))
-                Switch(checked = enabled, onCheckedChange = onEnabledChange)
+            Box(Modifier.size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                contentAlignment = Alignment.Center) {
+                Icon(icon, null, tint = MaterialTheme.colorScheme.primary)
             }
-
-            // Expanded Controls when enabled
-            if (enabled) {
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
-                content()
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                ) {
-                    TextButton(onClick = onTest) {
-                        Icon(Icons.Filled.PlayArrow, contentDescription = null, Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Test Trigger", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                    }
-                }
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.bodyLarge)
+                Text(if (on) subtitle else "Off", style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            Spacer(Modifier.width(8.dp))
+            Switch(checked = on, onCheckedChange = onToggle)
+        }
+        AnimatedVisibility(on) {
+            Column(Modifier.padding(start = 72.dp, end = 16.dp, bottom = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp), content = details)
         }
     }
 }
 
-/** One "what this needs" line: name, current state, and a button when something is missing. */
+/** "Does  [Volume panel ▾]": the job chip that opens the picker. */
 @Composable
-private fun RequirementRow(
-    label: String,
-    status: String,
-    ok: Boolean,
-    action: String?,
-    onAction: () -> Unit,
-) {
+private fun JobLine(label: String, job: ControlJob, routines: List<Routine>, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Icon(
-            if (ok) Icons.Filled.CheckCircle else Icons.Filled.ErrorOutline,
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f))
+        AssistChip(
+            onClick = onClick,
+            label = { Text(jobText(job, routines), maxLines = 1) },
+            leadingIcon = { Icon(jobIcon(job.action), null, Modifier.size(18.dp)) },
+            trailingIcon = { Icon(Icons.Outlined.ArrowDropDown, null, Modifier.size(18.dp)) },
+            colors = AssistChipDefaults.assistChipColors(
+                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                labelColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                leadingIconContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                trailingIconContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            ),
+            border = null,
+        )
+    }
+}
+
+private fun jobText(job: ControlJob, routines: List<Routine>): String =
+    if (job.action == FloatingAction.RUN_ROUTINE)
+        routines.firstOrNull { it.id == job.routineId }?.let { "Run “${it.name.trim()}”" } ?: "Pick a routine"
+    else job.action.label()
+
+private fun jobIcon(a: FloatingAction): ImageVector = when (a) {
+    FloatingAction.VOLUME_PANEL -> Icons.AutoMirrored.Outlined.VolumeUp
+    FloatingAction.VOLUME_UP -> Icons.Outlined.Add
+    FloatingAction.VOLUME_DOWN -> Icons.Outlined.Remove
+    FloatingAction.NONE -> Icons.Outlined.Block
+    FloatingAction.FLASHLIGHT -> Icons.Outlined.FlashlightOn
+    FloatingAction.RINGER_TOGGLE -> Icons.Outlined.Vibration
+    FloatingAction.DND_TOGGLE -> Icons.Outlined.DoNotDisturbOn
+    FloatingAction.RUN_ROUTINE -> Icons.Outlined.PlayCircle
+}
+
+@Composable
+private fun SensitivityChips(value: Sensitivity, onChange: (Sensitivity) -> Unit) {
+    ChipRow("Sensitivity") {
+        Sensitivity.entries.forEach { s ->
+            FilterChip(selected = value == s, onClick = { onChange(s) }, label = { Text(s.label()) })
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ChipRow(label: String, chips: @Composable () -> Unit) {
+    Column {
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) { chips() }
+    }
+}
+
+/** "Your routine “Torch” also uses Shake": both will run, so say so. */
+@Composable
+private fun AlsoUsedBy(routines: List<Routine>, what: String, match: (Trigger) -> Boolean) {
+    val users = routines.filter { r -> r.enabled && r.triggers.any(match) }
+    if (users.isEmpty()) return
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Outlined.Info, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.width(6.dp))
+        Text(
+            (if (users.size == 1) "Your routine “${users[0].name.trim()}” also uses $what, so both will run."
+            else "${users.size} routines also use $what, so they'll run too."),
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun SwitchLine(title: String, sub: String, on: Boolean, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(sub, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Spacer(Modifier.width(8.dp))
+        Switch(checked = on, onCheckedChange = onChange)
+    }
+}
+
+@Composable
+private fun Requirement(label: String, status: String, ok: Boolean, action: String?, onAction: () -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Icon(if (ok) Icons.Outlined.CheckCircle else Icons.Outlined.ErrorOutline,
             contentDescription = if (ok) "Ready" else "Needs attention",
             tint = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
-            modifier = Modifier.size(18.dp),
-        )
+            modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
-            Text(label, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-            Text(status, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(label, style = MaterialTheme.typography.bodyMedium)
+            Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        if (action != null) {
-            TextButton(onClick = onAction) { Text(action, fontSize = 12.sp) }
+        if (action != null) TextButton(onClick = onAction) { Text(action) }
+    }
+}
+
+@Composable
+private fun Notice(text: String, action: String, onAction: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(top = 8.dp).clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.errorContainer).padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onErrorContainer,
+            modifier = Modifier.weight(1f))
+        TextButton(onClick = onAction) { Text(action) }
+    }
+}
+
+/** "What should Shake do?" Picking "Run a routine" swaps the list for your routines. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun JobSheet(p: JobPick, routines: List<Routine>, onDismiss: () -> Unit, onPick: (ControlJob) -> Unit) {
+    var choosingRoutine by remember { mutableStateOf(false) }
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
+        Text(if (choosingRoutine) "Which routine?" else "What should ${p.what.replaceFirstChar { it.lowercase() }} do?",
+            style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(horizontal = 24.dp))
+        Text(
+            if (choosingRoutine) "It runs straight away, the same as tapping Run now."
+            else "Works on any screen.",
+            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 4.dp, bottom = 12.dp),
+        )
+        LazyColumn(Modifier.fillMaxWidth().heightIn(max = 520.dp), contentPadding = PaddingValues(bottom = 32.dp)) {
+            if (!choosingRoutine) {
+                items(FloatingAction.entries.filter { it != FloatingAction.NONE } + FloatingAction.NONE) { a ->
+                    val selected = p.current.action == a
+                    SheetOption(jobIcon(a), a.pickerLabel(), selected) {
+                        if (a == FloatingAction.RUN_ROUTINE) choosingRoutine = true else onPick(ControlJob(a))
+                    }
+                }
+            } else {
+                if (routines.isEmpty()) item {
+                    Text("You don't have any routines yet.", modifier = Modifier.padding(24.dp))
+                }
+                items(routines) { r ->
+                    SheetOption(Ic.of(r.icon), r.name.trim(),
+                        p.current.action == FloatingAction.RUN_ROUTINE && p.current.routineId == r.id) {
+                        onPick(ControlJob(FloatingAction.RUN_ROUTINE, r.id))
+                    }
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun OverlayPermissionWarning(onGrant: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f))
-            .padding(12.dp),
+private fun SheetOption(icon: ImageVector, text: String, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick)
+            .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow)
+            .padding(horizontal = 24.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Filled.Warning,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    "Display over other apps permission required",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                )
-            }
-            Text(
-                "Android requires this permission to display overlay shortcuts and monitor edge swipes outside this app.",
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onErrorContainer,
-                lineHeight = 15.sp,
-            )
-            Button(
-                onClick = onGrant,
-                shape = RoundedCornerShape(8.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.error,
-                    contentColor = MaterialTheme.colorScheme.onError,
-                ),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                modifier = Modifier.align(Alignment.End),
-            ) {
-                Text("Grant Permission", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-            }
-        }
+        Icon(icon, null, tint = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.width(18.dp))
+        Text(text, style = MaterialTheme.typography.bodyLarge,
+            color = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface)
     }
 }

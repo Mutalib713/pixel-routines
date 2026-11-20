@@ -150,7 +150,7 @@ class SwipeTriggerService : Service() {
 
         val settings = VolumePanelStore.load(this)
         if (settings.swipeEnabled && settings.swipeDirection == dir) {
-            VolumePanelController.show(this)
+            VolumePanelController.perform(this, settings.swipeJob)
         }
         // Routines fire on their own, whether or not the volume panel is set to this edge.
         Engine.handleEvent(this) { t -> t is Trigger.Swipe && t.direction == dir }

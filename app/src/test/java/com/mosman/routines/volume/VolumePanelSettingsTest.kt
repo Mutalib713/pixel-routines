@@ -63,4 +63,26 @@ class VolumePanelSettingsTest {
         assertEquals(false, parsed.statusUnmuteEnabled)
         assertEquals(false, parsed.statusUnmuteKeepLevel)
     }
+
+    @Test fun gestureJobs_roundTrip() {
+        val s = VolumePanelSettings(
+            shakeJob = ControlJob(FloatingAction.FLASHLIGHT),
+            flipEnabled = true,
+            flipJob = ControlJob(FloatingAction.RUN_ROUTINE, 42L),
+            floatingLongPressAction = FloatingAction.DND_TOGGLE,
+            floatingLongPressRoutineId = 7L,
+        )
+        val back = VolumePanelSettings.fromJson(JSONObject(s.toJson().toString()))
+        assertEquals(s, back)
+    }
+
+    @Test fun oldSettings_keepOpeningTheVolumePanel() {
+        // Saved before gestures had jobs: every gesture still does what it did (the volume panel).
+        val parsed = VolumePanelSettings.fromJson(JSONObject("""{"shakeEnabled":true}"""))
+        assertEquals(FloatingAction.VOLUME_PANEL, parsed.shakeJob.action)
+        assertEquals(FloatingAction.VOLUME_PANEL, parsed.backTapJob.action)
+        assertEquals(FloatingAction.VOLUME_PANEL, parsed.swipeJob.action)
+        assertEquals(FloatingAction.VOLUME_PANEL, parsed.floatingTapJob.action)
+        assertEquals(false, parsed.flipEnabled)
+    }
 }

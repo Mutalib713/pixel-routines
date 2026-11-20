@@ -64,20 +64,47 @@ enum class ButtonSize(val dpSize: Int) {
     }
 }
 
-/** Action triggered by secondary gestures on the floating volume button. */
+/**
+ * A job a gesture or button can do. It started as the floating button's list (the first four);
+ * the rest were added 2026-11-20 when Controls became general. Names are saved: append only,
+ * never rename (Sacred Rule 2).
+ */
 enum class FloatingAction {
     VOLUME_PANEL,
     VOLUME_UP,
     VOLUME_DOWN,
-    NONE;
+    NONE,
+    FLASHLIGHT,
+    RINGER_TOGGLE,
+    DND_TOGGLE,
+    RUN_ROUTINE;
 
     fun label(): String = when (this) {
-        VOLUME_PANEL -> "Open Volume Panel"
-        VOLUME_UP -> "Volume Up"
-        VOLUME_DOWN -> "Volume Down"
-        NONE -> "Disabled"
+        VOLUME_PANEL -> "Volume panel"
+        VOLUME_UP -> "Volume up"
+        VOLUME_DOWN -> "Volume down"
+        NONE -> "Nothing"
+        FLASHLIGHT -> "Flashlight"
+        RINGER_TOGGLE -> "Sound / Vibrate"
+        DND_TOGGLE -> "Do Not Disturb"
+        RUN_ROUTINE -> "Run a routine"
+    }
+
+    /** Longer wording for the picker sheet. */
+    fun pickerLabel(): String = when (this) {
+        VOLUME_PANEL -> "Show the volume panel"
+        VOLUME_UP -> "Volume up"
+        VOLUME_DOWN -> "Volume down"
+        NONE -> "Nothing"
+        FLASHLIGHT -> "Flashlight on or off"
+        RINGER_TOGGLE -> "Switch Sound / Vibrate"
+        DND_TOGGLE -> "Do Not Disturb on or off"
+        RUN_ROUTINE -> "Run a routine…"
     }
 }
+
+/** What one gesture does: a job, plus which routine when the job is RUN_ROUTINE. */
+data class ControlJob(val action: FloatingAction = FloatingAction.VOLUME_PANEL, val routineId: Long = 0L)
 
 /**
  * Data model for Volume Panel Triggers configuration.
@@ -104,6 +131,16 @@ data class VolumePanelSettings(
     val floatingButtonY: Int = -1,
     val floatingDoubleTapAction: FloatingAction = FloatingAction.VOLUME_DOWN,
     val floatingLongPressAction: FloatingAction = FloatingAction.VOLUME_UP,
+    val floatingDoubleTapRoutineId: Long = 0L,
+    val floatingLongPressRoutineId: Long = 0L,
+
+    // Jobs per gesture (2026-11-20). Each used to only open the volume panel; that stays the default.
+    val shakeJob: ControlJob = ControlJob(),
+    val backTapJob: ControlJob = ControlJob(),
+    val swipeJob: ControlJob = ControlJob(),
+    val floatingTapJob: ControlJob = ControlJob(),
+    val flipEnabled: Boolean = false,
+    val flipJob: ControlJob = ControlJob(FloatingAction.RINGER_TOGGLE),
 
     // General Settings
     val cooldownDurationMs: Long = 1500L,
@@ -132,6 +169,14 @@ data class VolumePanelSettings(
         put("floatingButtonY", floatingButtonY)
         put("floatingDoubleTapAction", floatingDoubleTapAction.name)
         put("floatingLongPressAction", floatingLongPressAction.name)
+        put("floatingDoubleTapRoutineId", floatingDoubleTapRoutineId)
+        put("floatingLongPressRoutineId", floatingLongPressRoutineId)
+        putJob("shakeJob", shakeJob)
+        putJob("backTapJob", backTapJob)
+        putJob("swipeJob", swipeJob)
+        putJob("floatingTapJob", floatingTapJob)
+        put("flipEnabled", flipEnabled)
+        putJob("flipJob", flipJob)
         put("cooldownDurationMs", cooldownDurationMs)
         put("hapticFeedbackEnabled", hapticFeedbackEnabled)
         put("screenOnOnly", screenOnOnly)
@@ -174,6 +219,24 @@ data class VolumePanelSettings(
             preserveSilentVibrate = json.optBoolean("preserveSilentVibrate", true),
             statusUnmuteEnabled = json.optBoolean("statusUnmuteEnabled", false),
             statusUnmuteKeepLevel = json.optBoolean("statusUnmuteKeepLevel", false),
+            floatingDoubleTapRoutineId = json.optLong("floatingDoubleTapRoutineId", 0L),
+            floatingLongPressRoutineId = json.optLong("floatingLongPressRoutineId", 0L),
+            shakeJob = json.job("shakeJob", ControlJob()),
+            backTapJob = json.job("backTapJob", ControlJob()),
+            swipeJob = json.job("swipeJob", ControlJob()),
+            floatingTapJob = json.job("floatingTapJob", ControlJob()),
+            flipEnabled = json.optBoolean("flipEnabled", false),
+            flipJob = json.job("flipJob", ControlJob(FloatingAction.RINGER_TOGGLE)),
+        )
+
+        private fun JSONObject.job(key: String, default: ControlJob): ControlJob = ControlJob(
+            runCatching { FloatingAction.valueOf(optString(key, default.action.name)) }.getOrDefault(default.action),
+            optLong("${key}Routine", default.routineId),
         )
     }
+}
+
+private fun JSONObject.putJob(key: String, j: ControlJob) {
+    put(key, j.action.name)
+    put("${key}Routine", j.routineId)
 }

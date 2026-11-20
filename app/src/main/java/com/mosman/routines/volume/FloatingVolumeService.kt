@@ -114,7 +114,8 @@ class FloatingVolumeService : Service() {
             private var lastTapTimestamp = 0L
 
             private val singleTapRunnable = Runnable {
-                VolumePanelController.show(this@FloatingVolumeService)
+                val s = VolumePanelStore.load(this@FloatingVolumeService)
+                VolumePanelController.perform(this@FloatingVolumeService, s.floatingTapJob, fromButton = true)
             }
 
             private val longPressRunnable = Runnable {
@@ -122,7 +123,7 @@ class FloatingVolumeService : Service() {
                     hasPerformedLongPress = true
                     container.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
                     val s = VolumePanelStore.load(this@FloatingVolumeService)
-                    VolumePanelController.executeFloatingAction(this@FloatingVolumeService, s.floatingLongPressAction)
+                    VolumePanelController.executeFloatingAction(this@FloatingVolumeService, s.floatingLongPressAction, s.floatingLongPressRoutineId)
                 }
             }
 
@@ -186,7 +187,7 @@ class FloatingVolumeService : Service() {
                             handler.removeCallbacks(singleTapRunnable)
                             lastTapTimestamp = 0L
                             val s = VolumePanelStore.load(this@FloatingVolumeService)
-                            VolumePanelController.executeFloatingAction(this@FloatingVolumeService, s.floatingDoubleTapAction)
+                            VolumePanelController.executeFloatingAction(this@FloatingVolumeService, s.floatingDoubleTapAction, s.floatingDoubleTapRoutineId)
                         } else {
                             // First tap: schedule single tap execution
                             lastTapTimestamp = now

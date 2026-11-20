@@ -113,12 +113,75 @@ object VolumePanelController {
     /**
      * Executes the designated floating button action.
      */
-    fun executeFloatingAction(ctx: Context, action: FloatingAction) {
-        when (action) {
-            FloatingAction.VOLUME_PANEL -> show(ctx, ignoreCooldown = true)
-            FloatingAction.VOLUME_DOWN -> adjustVolume(ctx, AudioManager.ADJUST_LOWER)
-            FloatingAction.VOLUME_UP -> adjustVolume(ctx, AudioManager.ADJUST_RAISE)
-            FloatingAction.NONE -> Unit
+    fun executeFloatingAction(ctx: Context, action: FloatingAction, routineId: Long = 0L) {
+        perform(ctx, ControlJob(action, routineId), fromButton = true)
+    }
+
+    /**
+     * Does one gesture's job. [fromButton] = a deliberate tap on the floating button, which skips
+     * the cooldown and screen-on checks that protect against accidental shakes and pocket taps.
+     * Toggles say what they did in a short toast, using the result the action itself reports
+     * (Sacred Rule 4: only what actually happened).
+     */
+    fun perform(ctx: Context, job: ControlJob, fromButton: Boolean = false) {
+        val app = ctx.applicationContext
+        if (job.action == FloatingAction.VOLUME_PANEL) { show(app, ignoreCooldown = fromButton); return }
+        if (!fromButton && !claimTrigger(app)) return
+        val settings = VolumePanelStore.load(app)
+        when (job.action) {
+            FloatingAction.VOLUME_PANEL, FloatingAction.NONE -> Unit
+            FloatingAction.VOLUME_DOWN -> adjustVolume(app, AudioManager.ADJUST_LOWER)
+            FloatingAction.VOLUME_UP -> adjustVolume(app, AudioManager.ADJUST_RAISE)
+            FloatingAction.FLASHLIGHT -> {
+                torchWatch(app)
+                toast(app, com.mosman.routines.Actions.runOne(app, com.mosman.routines.Action.Flashlight(!torchOn)))
+            }
+            FloatingAction.RINGER_TOGGLE -> {
+                val am = app.getSystemService(AudioManager::class.java)
+                val to = if (am.ringerMode == AudioManager.RINGER_MODE_NORMAL)
+                    com.mosman.routines.RingerMode.VIBRATE else com.mosman.routines.RingerMode.SOUND
+                toast(app, com.mosman.routines.Actions.runOne(app, com.mosman.routines.Action.Ringer(to)))
+            }
+            FloatingAction.DND_TOGGLE -> {
+                val nm = app.getSystemService(android.app.NotificationManager::class.java)
+                val on = nm.currentInterruptionFilter == android.app.NotificationManager.INTERRUPTION_FILTER_ALL
+                toast(app, com.mosman.routines.Actions.runOne(app, com.mosman.routines.Action.Dnd(on)))
+            }
+            FloatingAction.RUN_ROUTINE -> {
+                val r = com.mosman.routines.Store.get(app, job.routineId)
+                if (r == null) toast(app, "That routine no longer exists. Pick another in Controls.")
+                else com.mosman.routines.Engine.runNow(app, r) { toast(app, "Ran “${r.name.trim()}”") }
+            }
+        }
+        if (settings.hapticFeedbackEnabled && job.action != FloatingAction.NONE) performHaptic(app)
+    }
+
+    /** Cooldown + screen-on gate for gesture jobs other than the volume panel (which has its own). */
+    private fun claimTrigger(ctx: Context): Boolean {
+        if (!canTriggerNow(ctx)) return false
+        lastTriggerTimestamp.set(System.currentTimeMillis())
+        return true
+    }
+
+    private fun toast(ctx: Context, text: String) {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            android.widget.Toast.makeText(ctx, text, android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // Android has no "is the torch on?" call, only a callback, so we listen once and remember.
+    @Volatile private var torchOn = false
+    @Volatile private var torchWatching = false
+    fun torchWatch(ctx: Context) {
+        if (torchWatching) return
+        torchWatching = true
+        runCatching {
+            ctx.getSystemService(android.hardware.camera2.CameraManager::class.java).registerTorchCallback(
+                object : android.hardware.camera2.CameraManager.TorchCallback() {
+                    override fun onTorchModeChanged(cameraId: String, enabled: Boolean) { torchOn = enabled }
+                },
+                android.os.Handler(android.os.Looper.getMainLooper()),
+            )
         }
     }
 

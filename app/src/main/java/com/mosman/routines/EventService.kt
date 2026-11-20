@@ -38,7 +38,7 @@ class EventService : Service() {
     private val motionDetector = com.mosman.routines.volume.VolumeMotionDetector(
         onShakeDetected = {
             if (volSettings.shakeEnabled) {
-                com.mosman.routines.volume.VolumePanelController.show(this@EventService)
+                com.mosman.routines.volume.VolumePanelController.perform(this@EventService, volSettings.shakeJob)
             }
             Engine.handleEvent(this@EventService) {
                 it is Trigger.Gesture && it.type == GestureType.SHAKE
@@ -46,13 +46,16 @@ class EventService : Service() {
         },
         onBackTapDetected = {
             if (volSettings.backTapEnabled) {
-                com.mosman.routines.volume.VolumePanelController.show(this@EventService)
+                com.mosman.routines.volume.VolumePanelController.perform(this@EventService, volSettings.backTapJob)
             }
             Engine.handleEvent(this@EventService) {
                 it is Trigger.Gesture && it.type == GestureType.BACK_TAP
             }
         },
         onFlipDetected = { isDown ->
+            if (isDown && volSettings.flipEnabled) {
+                com.mosman.routines.volume.VolumePanelController.perform(this@EventService, volSettings.flipJob)
+            }
             Engine.handleEvent(this@EventService) {
                 it is Trigger.Gesture && it.type == if (isDown) GestureType.FLIP_DOWN else GestureType.FLIP_UP
             }
@@ -251,7 +254,8 @@ class EventService : Service() {
         // for a flip-only routine was just a source of false fires).
         wantShake = vol.shakeEnabled || GestureType.SHAKE in gestures
         wantBackTap = vol.backTapEnabled || GestureType.BACK_TAP in gestures
-        wantFlip = GestureType.FLIP_DOWN in gestures || GestureType.FLIP_UP in gestures
+        wantFlip = vol.flipEnabled || GestureType.FLIP_DOWN in gestures || GestureType.FLIP_UP in gestures
+        com.mosman.routines.volume.VolumePanelController.torchWatch(this)
 
         runCatching { sensors?.unregisterListener(sensorListener) }
         sensors = null
