@@ -1,6 +1,7 @@
 package com.mosman.routines.ui.home
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -9,6 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.DocumentScanner
 import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.material.icons.outlined.PauseCircle
 import androidx.compose.material.icons.outlined.PhotoCamera
@@ -129,17 +131,27 @@ fun HomeScreenRedesigned(
             )
         }
 
+        // Quick actions: a labelled 2 x 2 grid. As four small squares in one row with no heading,
+        // they read as decoration rather than buttons.
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(Sp.s)) {
-                QuickAction(Icons.Outlined.Add, "New routine", Modifier.weight(1f), onOpenCreateOptions)
-                QuickAction(Icons.Outlined.PhotoCamera, "From a picture", Modifier.weight(1f), onNavigateToLens)
-                QuickAction(Icons.Outlined.Lightbulb, "Ideas", Modifier.weight(1f), onNavigateToDiscover)
-                QuickAction(
-                    if (paused) Icons.Outlined.PlayCircle else Icons.Outlined.PauseCircle,
-                    if (paused) "Resume all" else "Pause all",
-                    Modifier.weight(1f),
-                ) {
-                    Store.setPaused(ctx, !paused); paused = !paused
+            Text("Quick actions", style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(top = Sp.s).semantics { heading() })
+        }
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(Sp.s)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(Sp.s)) {
+                    QuickAction(Icons.Outlined.Add, "New routine", Modifier.weight(1f), onOpenCreateOptions)
+                    QuickAction(Icons.Outlined.DocumentScanner, "Scan file or image", Modifier.weight(1f), onNavigateToLens)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(Sp.s)) {
+                    QuickAction(Icons.Outlined.Lightbulb, "Ideas", Modifier.weight(1f), onNavigateToDiscover)
+                    QuickAction(
+                        if (paused) Icons.Outlined.PlayCircle else Icons.Outlined.PauseCircle,
+                        if (paused) "Resume all" else "Pause all",
+                        Modifier.weight(1f),
+                    ) {
+                        Store.setPaused(ctx, !paused); paused = !paused
+                    }
                 }
             }
         }
@@ -252,17 +264,18 @@ private fun inHowLong(at: ZonedDateTime): String {
 
 @Composable
 private fun QuickAction(icon: ImageVector, label: String, modifier: Modifier, onClick: () -> Unit) {
+    // Wide tile, icon then label, like a Quick Settings tile.
     Surface(onClick = onClick, shape = Shp.tile, color = MaterialTheme.colorScheme.surfaceContainer, modifier = modifier) {
-        Column(
-            Modifier.padding(vertical = Sp.m, horizontal = Sp.xs).heightIn(min = 64.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
+        Row(
+            Modifier.padding(horizontal = Sp.m).heightIn(min = 64.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.height(Sp.xs))
-            // Centred: "From a picture" wraps to two lines and sat left-aligned on the Pixel.
-            Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            Box(
+                Modifier.size(36.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center,
+            ) { Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(20.dp)) }
+            Spacer(Modifier.width(Sp.m))
+            Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
     }
 }

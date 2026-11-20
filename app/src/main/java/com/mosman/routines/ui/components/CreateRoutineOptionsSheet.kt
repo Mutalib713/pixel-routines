@@ -1,29 +1,30 @@
 package com.mosman.routines.ui.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.DocumentScanner
+import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 
+/**
+ * "How do you want to start?" sheet shown before a new routine.
+ *
+ * Same grouped-list look as Settings and the editor's bands: one rounded group, rows split by
+ * thin gaps, icons on the theme's primary container. It used to have four hard-coded gradient
+ * circles (blue, green, blue, amber) that ignored the wallpaper colours the rest of the app uses.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CreateRoutineOptionsSheet(
@@ -35,134 +36,49 @@ fun CreateRoutineOptionsSheet(
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        containerColor = MaterialTheme.colorScheme.surface,
-        dragHandle = { BottomSheetDefaults.DragHandle() },
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
         Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 40.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 32.dp),
         ) {
-            Column {
-                Text(
-                    text = "Create a Routine",
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = "How would you like to create your routine?",
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            Text("New routine", style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.padding(horizontal = 8.dp))
+            Text("How do you want to start?", style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 16.dp))
+
+            Column(Modifier.clip(RoundedCornerShape(24.dp)), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Option(Icons.Outlined.AutoAwesome, "Ask Routine AI",
+                    "Describe it in your own words") { onDismiss(); onChatWithAi() }
+                Option(Icons.Outlined.DocumentScanner, "Scan a file or image",
+                    "A photo, screenshot, PDF or text file") { onDismiss(); onFromImage() }
+                Option(Icons.Outlined.Add, "Start from scratch",
+                    "Pick the WHEN and THEN yourself") { onDismiss(); onManualSetup() }
+                Option(Icons.Outlined.Lightbulb, "Pick an idea",
+                    "Ready-made routines you can change") { onDismiss(); onUseTemplate() }
             }
-
-            // 1. Chat with Routine AI
-            CreationOptionCard(
-                title = "Chat with Routine AI",
-                subtitle = "Describe what you want in natural language.",
-                icon = Icons.Filled.AutoAwesome,
-                iconTint = Color.White,
-                iconBackground = Brush.linearGradient(
-                    colors = listOf(Color(0xFF3B82F6), Color(0xFF8B5CF6))
-                ),
-                onClick = { onDismiss(); onChatWithAi() },
-            )
-
-            // 2. From Image (Routine Lens)
-            CreationOptionCard(
-                title = "From Image",
-                subtitle = "Scan a timetable, schedule or any image.",
-                icon = Icons.Filled.CameraAlt,
-                iconTint = Color.White,
-                iconBackground = Brush.linearGradient(
-                    colors = listOf(Color(0xFF10B981), Color(0xFF059669))
-                ),
-                onClick = { onDismiss(); onFromImage() },
-            )
-
-            // 3. Manual Setup
-            CreationOptionCard(
-                title = "Manual Setup",
-                subtitle = "Build your routine step by step.",
-                icon = Icons.Filled.Add,
-                iconTint = Color.White,
-                iconBackground = Brush.linearGradient(
-                    colors = listOf(Color(0xFF2563EB), Color(0xFF1D4ED8))
-                ),
-                onClick = { onDismiss(); onManualSetup() },
-            )
-
-            // 4. Use a Template
-            CreationOptionCard(
-                title = "Use a Template",
-                subtitle = "Start with a ready-made idea.",
-                icon = Icons.Filled.Lightbulb,
-                iconTint = Color.White,
-                iconBackground = Brush.linearGradient(
-                    colors = listOf(Color(0xFFF59E0B), Color(0xFFD97706))
-                ),
-                onClick = { onDismiss(); onUseTemplate() },
-            )
         }
     }
 }
 
 @Composable
-private fun CreationOptionCard(
-    title: String,
-    subtitle: String,
-    icon: ImageVector,
-    iconTint: Color,
-    iconBackground: Brush,
-    onClick: () -> Unit,
-) {
-    Card(
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-        ),
-        modifier = Modifier
-            .fillMaxWidth()
+private fun Option(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             .clickable(onClick = onClick)
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
-                shape = RoundedCornerShape(20.dp),
-            ),
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                Modifier
-                    .size(46.dp)
-                    .clip(CircleShape)
-                    .background(iconBackground),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(22.dp))
-            }
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
-                Text(title, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    subtitle,
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    lineHeight = 17.sp,
-                )
-            }
-            Icon(
-                Icons.AutoMirrored.Filled.ArrowForwardIos,
-                contentDescription = null,
-                modifier = Modifier.size(14.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-            )
+        Box(
+            Modifier.size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
+            contentAlignment = Alignment.Center,
+        ) { Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer) }
+        Spacer(Modifier.width(16.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(subtitle, style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
