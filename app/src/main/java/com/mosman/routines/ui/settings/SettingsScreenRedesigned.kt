@@ -1,41 +1,58 @@
 package com.mosman.routines.ui.settings
 
-import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.os.Build
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.VolumeUp
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.mosman.routines.Permissions
 import com.mosman.routines.ShizukuBridge
 import com.mosman.routines.Store
+import com.mosman.routines.ai.AssistantMode
+import com.mosman.routines.ai.AssistantPrefs
 import com.mosman.routines.ui.theme.AppThemeMode
 import com.mosman.routines.ui.theme.ThemePreferences
-import com.mosman.routines.volume.VolumePanelStore
 import kotlinx.coroutines.launch
+
+/**
+ * Settings, layout S1 (picked by Mutalib 2026-11-20): one list like Pixel's own Settings app,
+ * icon + one-line summary per group, each opening its own page. Activity lives here now.
+ */
+private object Sp {
+    val xs = 4.dp; val s = 8.dp; val m = 12.dp; val l = 16.dp; val xl = 20.dp; val xxl = 32.dp
+}
+private object Shp {
+    val group = RoundedCornerShape(24.dp)
+    val row = RoundedCornerShape(16.dp)
+}
+
+private enum class Page(val title: String) {
+    MAIN("Settings"), APPEARANCE("Appearance"), PERMISSIONS("Permissions"), AI("Routine AI"),
+    BACKUP("Backup"), ADVANCED("Advanced"), ABOUT("About"),
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -43,67 +60,55 @@ fun SettingsScreenRedesigned(
     tick: Int,
     onBack: () -> Unit,
     onNavigateToVolumeTriggers: () -> Unit = {},
+    onNavigateToActivity: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val ctx = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    var page by remember { mutableStateOf(Page.MAIN) }
 
-    var themeMode by remember { mutableStateOf(ThemePreferences.getThemeMode(ctx)) }
-    var dynamicColor by remember { mutableStateOf(ThemePreferences.isDynamicColor(ctx)) }
+    // A sub-page catches Back first and returns to the list.
+    BackHandler(enabled = page != Page.MAIN) { page = Page.MAIN }
+
+    val perms = remember(tick) { permissionRows(ctx) }
+    val missing = perms.count { !it.granted }
     var paused by remember(tick) { mutableStateOf(Store.isPaused(ctx)) }
-
-    val shizukuReady = remember(tick) { ShizukuBridge.ready }
-    val shizukuStatus = remember(tick) { ShizukuBridge.status(ctx) }
-    val secureGranted = remember(tick) { Permissions.hasSecureSettings(ctx) }
-    val dndGranted = remember(tick) { Permissions.hasDnd(ctx) }
-    val alarmsGranted = remember(tick) { Permissions.hasExactAlarm(ctx) }
-    val writeGranted = remember(tick) { Permissions.hasWriteSettings(ctx) }
-    val notifGranted = remember(tick) {
-        if (Build.VERSION.SDK_INT >= 33) Permissions.hasNotifications(ctx) else true
+    val themeMode = ThemePreferences.getThemeMode(ctx)
+    val dynamic = ThemePreferences.isDynamicColor(ctx)
+    var aiMode by remember(tick) { mutableStateOf(AssistantPrefs.mode(ctx)) }
+    var aiConsent by remember(tick) { mutableStateOf(AssistantPrefs.hasConsent(ctx)) }
+    val version = remember {
+        runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: "?"
     }
 
-    val adbCmd = "adb shell pm grant ${ctx.packageName} android.permission.WRITE_SECURE_SETTINGS"
-
-    // Document export & import contracts
-    val exporter = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/json")
-    ) { uri ->
+    val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) {
-            runCatching {
-                ctx.contentResolver.openOutputStream(uri)?.use {
-                    it.write(Store.exportJson(ctx).toByteArray())
-                }
-            }
-            scope.launch { snackbar.showSnackbar("Routines exported successfully") }
+            val ok = runCatching {
+                ctx.contentResolver.openOutputStream(uri)?.use { it.write(Store.exportJson(ctx).toByteArray()) } != null
+            }.getOrDefault(false)
+            scope.launch { snackbar.showSnackbar(if (ok) "Routines saved to the file" else "Couldn't write the file") }
         }
     }
-
-    val importer = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri ->
+    val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             val added = runCatching {
-                ctx.contentResolver.openInputStream(uri)?.use {
-                    Store.importJson(ctx, it.readBytes().decodeToString())
-                } ?: 0
+                ctx.contentResolver.openInputStream(uri)?.use { Store.importJson(ctx, it.readBytes().decodeToString()) } ?: 0
             }.getOrDefault(0)
             scope.launch {
-                snackbar.showSnackbar(
-                    if (added > 0) "Imported $added routine${if (added == 1) "" else "s"}"
-                    else "No valid routines found in file"
-                )
+                snackbar.showSnackbar(if (added > 0) "Added $added routine${if (added == 1) "" else "s"}" else "No routines found in that file")
             }
         }
     }
 
     Scaffold(
+        modifier = modifier,
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
-                title = { Text("Settings", fontWeight = FontWeight.Bold) },
+                title = { Text(page.title) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = { if (page == Page.MAIN) onBack() else page = Page.MAIN }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
@@ -111,325 +116,124 @@ fun SettingsScreenRedesigned(
         },
     ) { pad ->
         LazyColumn(
-            modifier = modifier
-                .fillMaxSize()
-                .padding(pad),
-            contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 8.dp, bottom = 40.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            Modifier.fillMaxSize().padding(pad),
+            contentPadding = PaddingValues(start = Sp.l, end = Sp.l, top = Sp.s, bottom = Sp.xxl),
+            verticalArrangement = Arrangement.spacedBy(Sp.m),
         ) {
-            // Profile Card (Matching Screen 9)
-            item {
-                Card(
-                    shape = RoundedCornerShape(24.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Row(
-                        Modifier.padding(18.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(
-                            Modifier
-                                .size(50.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.primary),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                "M",
-                                color = MaterialTheme.colorScheme.onPrimary,
-                                fontSize = 22.sp,
-                                fontWeight = FontWeight.Bold,
-                            )
+            when (page) {
+                Page.MAIN -> mainPage(
+                    paused = paused,
+                    onPause = { Store.setPaused(ctx, it); paused = it },
+                    themeSummary = "${themeMode.short()} · ${if (dynamic) "wallpaper colours" else "app colours"}",
+                    missing = missing,
+                    aiSummary = "${aiMode.label()} · ${if (aiConsent) "Gemini allowed" else "Gemini not allowed yet"}",
+                    shizukuSummary = ShizukuBridge.status(ctx),
+                    version = version,
+                    open = { page = it },
+                    onActivity = onNavigateToActivity,
+                    onControls = onNavigateToVolumeTriggers,
+                )
+
+                Page.APPEARANCE -> {
+                    item { Label("Theme") }
+                    item {
+                        Group {
+                            AppThemeMode.entries.forEach { m ->
+                                RadioRow(m.short(), selected = themeMode == m) { ThemePreferences.setThemeMode(ctx, m) }
+                            }
                         }
-                        Spacer(Modifier.width(14.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("Mutalib", fontWeight = FontWeight.Bold, fontSize = 17.sp)
-                            Text(
-                                "Pixel 6 Pro · Android 14",
-                                fontSize = 13.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                    }
+                    item { Label("Colours") }
+                    item {
+                        Group {
+                            SwitchRow(
+                                Icons.Outlined.Wallpaper, "Wallpaper colours",
+                                "Match the app to your wallpaper, like the rest of your Pixel", dynamic,
+                            ) { ThemePreferences.setDynamicColor(ctx, it) }
                         }
                     }
                 }
-            }
 
-            // Global Pause Card
-            item {
-                Card(
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surface,
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(
-                            width = 1.dp,
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                            shape = RoundedCornerShape(20.dp),
-                        ),
-                ) {
-                    Row(
-                        Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Pause all routines", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                            Spacer(Modifier.height(2.dp))
-                            Text(
-                                "Temporarily pause all automations",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                Page.PERMISSIONS -> {
+                    item {
+                        Note("Each one unlocks something specific. Routines that need a missing one say so in the editor.")
+                    }
+                    item {
+                        Group {
+                            perms.forEach { p ->
+                                PermRow(p) { ctx.startActivity(p.open(ctx)) }
+                            }
                         }
-                        Switch(
-                            checked = paused,
-                            onCheckedChange = {
-                                paused = it
-                                Store.setPaused(ctx, it)
-                            },
-                        )
                     }
                 }
-            }
 
-            // Section: Controls & Gestures
-            item {
-                SettingsSectionHeader("Controls & Gestures")
-                val volumeSettings = remember(tick) { VolumePanelStore.load(ctx) }
-                val activeCount = remember(volumeSettings) {
-                    var count = 0
-                    if (volumeSettings.shakeEnabled) count++
-                    if (volumeSettings.backTapEnabled) count++
-                    if (volumeSettings.swipeEnabled) count++
-                    if (volumeSettings.floatingButtonEnabled) count++
-                    if (volumeSettings.statusUnmuteEnabled) count++
-                    count
-                }
-                Card(
-                    onClick = onNavigateToVolumeTriggers,
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(20.dp)),
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.primaryContainer),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.VolumeUp,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.size(24.dp),
-                            )
-                        }
-                        Spacer(Modifier.width(14.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                "Volume Panel Triggers",
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 15.sp,
-                            )
-                            Spacer(Modifier.height(2.dp))
-                            Text(
-                                "Open volume controls with gestures or on-screen button",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Spacer(Modifier.width(8.dp))
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(
-                                    if (activeCount > 0) MaterialTheme.colorScheme.primaryContainer
-                                    else MaterialTheme.colorScheme.surfaceVariant
-                                )
-                                .padding(horizontal = 8.dp, vertical = 4.dp),
-                        ) {
-                            Text(
-                                text = if (activeCount > 0) "$activeCount active" else "Off",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (activeCount > 0) MaterialTheme.colorScheme.onPrimaryContainer
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Spacer(Modifier.width(4.dp))
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowForward,
-                            contentDescription = "Open",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
-                }
-            }
-
-            // Section: Appearance
-            item {
-                SettingsSectionHeader("Appearance")
-                Card(
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(20.dp)),
-                ) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                        Text("Theme mode", fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                            AppThemeMode.entries.forEachIndexed { i, mode ->
-                                SegmentedButton(
-                                    selected = themeMode == mode,
-                                    onClick = {
-                                        themeMode = mode
-                                        ThemePreferences.setThemeMode(ctx, mode)
-                                    },
-                                    shape = SegmentedButtonDefaults.itemShape(i, AppThemeMode.entries.size),
-                                ) {
-                                    Text(mode.label(), fontSize = 12.sp)
+                Page.AI -> {
+                    item { Label("Who answers") }
+                    item {
+                        Group {
+                            AssistantMode.entries.forEach { m ->
+                                RadioRow(m.label(), m.detail(), selected = aiMode == m) {
+                                    AssistantPrefs.setMode(ctx, m); aiMode = m
                                 }
                             }
                         }
+                    }
+                    item { Label("Gemini") }
+                    item {
+                        Group {
+                            SwitchRow(
+                                Icons.Outlined.Cloud, "Typed messages may go to Gemini",
+                                "Only when the phone can't answer. Google may use them on the free plan.", aiConsent,
+                            ) { AssistantPrefs.setConsent(ctx, it); aiConsent = it }
+                        }
+                    }
+                    item { Note("Pictures and files are asked about every time, whatever this switch says.") }
+                }
 
-                        if (Build.VERSION.SDK_INT >= 31) {
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Column(Modifier.weight(1f)) {
-                                    Text("Dynamic color", fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                                    Text(
-                                        "Use colors extracted from your wallpaper",
-                                        fontSize = 12.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                                Switch(
-                                    checked = dynamicColor,
-                                    onCheckedChange = {
-                                        dynamicColor = it
-                                        ThemePreferences.setDynamicColor(ctx, it)
-                                    },
-                                )
+                Page.BACKUP -> {
+                    item { Note("Save your routines to a file to keep a copy or move them to another phone.") }
+                    item {
+                        Group {
+                            NavRow(Icons.Outlined.Upload, "Save to a file", "pixel-routines.json") {
+                                exporter.launch("pixel-routines.json")
+                            }
+                            NavRow(Icons.Outlined.Download, "Add from a file", "Routines in it are added, nothing is replaced") {
+                                importer.launch(arrayOf("application/json", "text/plain", "*/*"))
                             }
                         }
                     }
                 }
-            }
 
-            // Section: Permissions
-            item {
-                SettingsSectionHeader("Permissions & Access")
-                Card(
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(20.dp)),
-                ) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        PermissionStatusRow("Do Not Disturb", dndGranted) {
-                            ctx.startActivity(Permissions.dndSettings())
-                        }
-                        PermissionStatusRow("Exact Alarms", alarmsGranted) {
-                            ctx.startActivity(Permissions.exactAlarmSettings(ctx))
-                        }
-                        PermissionStatusRow("Modify System Settings", writeGranted) {
-                            ctx.startActivity(Permissions.writeSettings(ctx))
-                        }
-                        PermissionStatusRow("Notifications", notifGranted) {
-                            ctx.startActivity(Permissions.appDetails(ctx))
-                        }
-                        PermissionStatusRow("Shizuku ADB Access", shizukuReady) {
-                            if (ShizukuBridge.running && !ShizukuBridge.granted) ShizukuBridge.requestPermission()
-                            else ShizukuBridge.openShizuku(ctx)
-                        }
-                        PermissionStatusRow("Secure Settings", secureGranted) {
-                            val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            cm.setPrimaryClip(ClipData.newPlainText("adb", adbCmd))
-                            scope.launch { snackbar.showSnackbar("ADB command copied to clipboard") }
-                        }
+                Page.ADVANCED -> {
+                    item {
+                        Note("Wi-Fi, Bluetooth and airplane-mode actions, pressing keys for WhatsApp statuses and battery saver need extra access that only a computer or Shizuku can give.")
                     }
-                }
-            }
-
-            // Section: Backup & Export
-            item {
-                SettingsSectionHeader("Backup & Export")
-                Card(
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(20.dp)),
-                ) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text(
-                            "Export your routines to a JSON file to back them up or transfer to another device.",
-                            fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            lineHeight = 18.sp,
-                        )
-                        Spacer(Modifier.height(14.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            FilledTonalButton(
-                                onClick = { exporter.launch("pixel-routines.json") },
-                                shape = RoundedCornerShape(12.dp),
-                            ) {
-                                Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("Export")
+                    item {
+                        Group {
+                            NavRow(Icons.Outlined.Terminal, "Shizuku", ShizukuBridge.status(ctx)) {
+                                if (ShizukuBridge.running && !ShizukuBridge.granted) ShizukuBridge.requestPermission()
+                                else ShizukuBridge.openShizuku(ctx)
                             }
-                            FilledTonalButton(
-                                onClick = { importer.launch(arrayOf("application/json", "text/plain", "*/*")) },
-                                shape = RoundedCornerShape(12.dp),
+                            val secure = Permissions.hasSecureSettings(ctx)
+                            NavRow(
+                                Icons.Outlined.AdminPanelSettings, "Secure settings",
+                                if (secure) "Allowed" else "Tap to copy the one-time ADB command",
                             ) {
-                                Icon(Icons.Filled.Download, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("Import")
+                                val cmd = "adb shell pm grant ${ctx.packageName} android.permission.WRITE_SECURE_SETTINGS"
+                                (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+                                    .setPrimaryClip(ClipData.newPlainText("adb", cmd))
+                                scope.launch { snackbar.showSnackbar("ADB command copied") }
                             }
                         }
                     }
                 }
-            }
 
-            // Section: General & About
-            item {
-                SettingsSectionHeader("General")
-                Card(
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(20.dp)),
-                ) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Pixel Routines", fontWeight = FontWeight.Bold, fontSize = 15.sp, modifier = Modifier.weight(1f))
-                            Text("v1.2", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Page.ABOUT -> {
+                    item {
+                        Group {
+                            NavRow(Icons.Outlined.Info, "Pixel Routines", "Version $version") {}
+                            NavRow(Icons.Outlined.Lock, "Privacy", "Routines stay on your phone. Only Routine AI's online answers use the internet.") {}
                         }
-                        Text(
-                            "Smart, privacy-focused automation for Android.",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
                     }
                 }
             }
@@ -437,45 +241,177 @@ fun SettingsScreenRedesigned(
     }
 }
 
+// ---- Main list ---------------------------------------------------------------------------
+
+private fun LazyListScope.mainPage(
+    paused: Boolean,
+    onPause: (Boolean) -> Unit,
+    themeSummary: String,
+    missing: Int,
+    aiSummary: String,
+    shizukuSummary: String,
+    version: String,
+    open: (Page) -> Unit,
+    onActivity: () -> Unit,
+    onControls: () -> Unit,
+) {
+    item {
+        Row(
+            Modifier.fillMaxWidth().clip(Shp.group).background(MaterialTheme.colorScheme.surfaceContainer).padding(Sp.l),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary), contentAlignment = Alignment.Center) {
+                Text("M", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onPrimary)
+            }
+            Spacer(Modifier.width(Sp.l))
+            Column {
+                Text("Mutalib", style = MaterialTheme.typography.titleMedium)
+                Text("${Build.MODEL} · Android ${Build.VERSION.RELEASE}", style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+    item {
+        Group {
+            SwitchRow(Icons.Outlined.PauseCircle, "Pause all routines", "Nothing runs until you switch this off", paused, onPause)
+        }
+    }
+    item {
+        Group {
+            NavRow(Icons.Outlined.History, "Activity", "What ran, when, and anything that failed", onClick = onActivity)
+            NavRow(Icons.Outlined.Tune, "Controls", "Floating volume button, swipes, shake, WhatsApp", onClick = onControls)
+            NavRow(Icons.Outlined.Palette, "Appearance", themeSummary) { open(Page.APPEARANCE) }
+            NavRow(
+                Icons.Outlined.VerifiedUser, "Permissions",
+                if (missing == 0) "Everything the app uses is allowed" else "What the app is allowed to do",
+                badge = if (missing > 0) "$missing needed" else null,
+            ) { open(Page.PERMISSIONS) }
+            NavRow(Icons.Filled.AutoAwesome, "Routine AI", aiSummary) { open(Page.AI) }
+        }
+    }
+    item {
+        Group {
+            NavRow(Icons.Outlined.Save, "Backup", "Save or add routines from a file") { open(Page.BACKUP) }
+            NavRow(Icons.Outlined.Terminal, "Advanced", "Shizuku: $shizukuSummary") { open(Page.ADVANCED) }
+            NavRow(Icons.Outlined.Info, "About", "Version $version") { open(Page.ABOUT) }
+        }
+    }
+}
+
+private fun AppThemeMode.short() = when (this) {
+    AppThemeMode.SYSTEM -> "Same as phone"
+    AppThemeMode.LIGHT -> "Light"
+    AppThemeMode.DARK -> "Dark"
+}
+
+// ---- Permissions --------------------------------------------------------------------------
+
+private class Perm(val icon: ImageVector, val name: String, val why: String, val granted: Boolean, val open: (Context) -> android.content.Intent)
+
+private fun permissionRows(ctx: Context): List<Perm> = listOf(
+    Perm(Icons.Outlined.DoNotDisturbOn, "Do Not Disturb", "Switch Do Not Disturb and the ringer", Permissions.hasDnd(ctx)) { Permissions.dndSettings() },
+    Perm(Icons.Outlined.Alarm, "Alarms on the minute", "Run time routines exactly on time", Permissions.hasExactAlarm(ctx)) { Permissions.exactAlarmSettings(it) },
+    Perm(Icons.Outlined.Settings, "Change system settings", "Brightness, rotation, ringtone", Permissions.hasWriteSettings(ctx)) { Permissions.writeSettings(it) },
+    Perm(Icons.Outlined.Notifications, "Notifications", "Tell you when a routine runs, and reminders", Permissions.hasNotifications(ctx)) { Permissions.appDetails(it) },
+    Perm(Icons.Outlined.QueryStats, "Usage access", "Notice which app is open (app triggers, WhatsApp unmute)", Permissions.hasUsageAccess(ctx)) { Permissions.usageAccessSettings() },
+    Perm(Icons.Outlined.Layers, "Display over other apps", "Floating volume button and edge swipes", Permissions.hasOverlay(ctx)) { Permissions.overlaySettings(it) },
+)
+
+// ---- Pieces -------------------------------------------------------------------------------
+
 @Composable
-private fun SettingsSectionHeader(title: String) {
-    Text(
-        text = title,
-        fontSize = 14.sp,
-        fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 4.dp, bottom = 2.dp),
+private fun Group(content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().clip(Shp.group).background(MaterialTheme.colorScheme.surfaceContainerLow).padding(vertical = Sp.xs),
+        content = content,
     )
 }
 
 @Composable
-private fun PermissionStatusRow(name: String, granted: Boolean, onClick: () -> Unit) {
+private fun Label(text: String) {
+    Text(text, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = Sp.l, top = Sp.s))
+}
+
+@Composable
+private fun Note(text: String) {
+    Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = Sp.s))
+}
+
+@Composable
+private fun NavRow(icon: ImageVector, title: String, summary: String, badge: String? = null, onClick: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        Modifier.fillMaxWidth().clip(Shp.row).clickable(onClick = onClick).padding(horizontal = Sp.l, vertical = Sp.m),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.width(Sp.xl))
         Column(Modifier.weight(1f)) {
-            Text(name, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(summary, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(8.dp))
-                .background(
-                    if (granted) Color(0xFF10B981).copy(alpha = 0.15f)
-                    else MaterialTheme.colorScheme.errorContainer
-                )
-                .padding(horizontal = 8.dp, vertical = 3.dp),
-        ) {
+        badge?.let {
+            Spacer(Modifier.width(Sp.s))
             Text(
-                text = if (granted) "Granted" else "Needed",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                color = if (granted) Color(0xFF10B981) else MaterialTheme.colorScheme.onErrorContainer,
+                it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.clip(Shp.row).background(MaterialTheme.colorScheme.errorContainer)
+                    .padding(horizontal = Sp.s, vertical = Sp.xs),
             )
         }
-        Spacer(Modifier.width(8.dp))
-        TextButton(onClick = onClick) {
-            Text(if (granted) "Manage" else "Grant", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun SwitchRow(icon: ImageVector, title: String, summary: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(Shp.row).clickable { onChange(!checked) }.padding(horizontal = Sp.l, vertical = Sp.m),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.width(Sp.xl))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(summary, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        Spacer(Modifier.width(Sp.s))
+        Switch(checked = checked, onCheckedChange = onChange)
+    }
+}
+
+@Composable
+private fun RadioRow(title: String, summary: String? = null, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(Shp.row).selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+            .padding(horizontal = Sp.l, vertical = Sp.m),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        Spacer(Modifier.width(Sp.l))
+        Column {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            summary?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
+    }
+}
+
+@Composable
+private fun PermRow(p: Perm, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(Shp.row).clickable(onClick = onClick).padding(horizontal = Sp.l, vertical = Sp.m),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(p.icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.width(Sp.xl))
+        Column(Modifier.weight(1f)) {
+            Text(p.name, style = MaterialTheme.typography.titleMedium)
+            Text(p.why, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Spacer(Modifier.width(Sp.s))
+        Text(
+            if (p.granted) "Allowed" else "Allow",
+            style = MaterialTheme.typography.labelLarge,
+            color = if (p.granted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
+        )
     }
 }

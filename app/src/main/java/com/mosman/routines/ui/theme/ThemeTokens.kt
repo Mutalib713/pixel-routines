@@ -11,6 +11,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
@@ -95,34 +96,39 @@ private val DarkColors = darkColorScheme(
     onErrorContainer = Color(0xFFFECACA),
 )
 
+/**
+ * Theme choices, saved in SharedPreferences AND held in Compose state. The state is the fix for
+ * "changing the theme doesn't work": the theme used to read the saved value once at start-up, so
+ * a change only showed after the app restarted. Reading these from a composable now subscribes
+ * it, so the whole app repaints the moment a choice changes.
+ */
 object ThemePreferences {
     private const val PREFS = "pixel_routines_theme"
     private const val KEY_MODE = "theme_mode"
     private const val KEY_DYNAMIC = "use_dynamic_color"
 
-    fun getThemeMode(context: Context): AppThemeMode {
-        val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(KEY_MODE, AppThemeMode.SYSTEM.name)
-        return runCatching { AppThemeMode.valueOf(raw!!) }.getOrDefault(AppThemeMode.SYSTEM)
+    private val modeState = mutableStateOf<AppThemeMode?>(null)
+    private val dynamicState = mutableStateOf<Boolean?>(null)
+
+    private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    fun getThemeMode(context: Context): AppThemeMode = modeState.value ?: run {
+        val raw = prefs(context).getString(KEY_MODE, AppThemeMode.SYSTEM.name)
+        runCatching { AppThemeMode.valueOf(raw!!) }.getOrDefault(AppThemeMode.SYSTEM).also { modeState.value = it }
     }
 
     fun setThemeMode(context: Context, mode: AppThemeMode) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit()
-            .putString(KEY_MODE, mode.name)
-            .apply()
+        prefs(context).edit().putString(KEY_MODE, mode.name).apply()
+        modeState.value = mode
     }
 
-    fun isDynamicColor(context: Context): Boolean {
-        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getBoolean(KEY_DYNAMIC, true)
+    fun isDynamicColor(context: Context): Boolean = dynamicState.value ?: run {
+        prefs(context).getBoolean(KEY_DYNAMIC, true).also { dynamicState.value = it }
     }
 
     fun setDynamicColor(context: Context, enabled: Boolean) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit()
-            .putBoolean(KEY_DYNAMIC, enabled)
-            .apply()
+        prefs(context).edit().putBoolean(KEY_DYNAMIC, enabled).apply()
+        dynamicState.value = enabled
     }
 }
 
@@ -143,6 +149,20 @@ fun PixelRoutinesTheme(
         if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
     } else {
         if (dark) DarkColors else LightColors
+    }
+
+    // Status-bar and navigation-bar icons follow the APP's theme, not the system's: forcing
+    // Light while the phone is in dark mode used to leave white icons on a white bar.
+    val view = androidx.compose.ui.platform.LocalView.current
+    if (!view.isInEditMode) {
+        androidx.compose.runtime.SideEffect {
+            (view.context as? android.app.Activity)?.window?.let { w ->
+                androidx.core.view.WindowCompat.getInsetsController(w, view).apply {
+                    isAppearanceLightStatusBars = !dark
+                    isAppearanceLightNavigationBars = !dark
+                }
+            }
+        }
     }
 
     MaterialTheme(

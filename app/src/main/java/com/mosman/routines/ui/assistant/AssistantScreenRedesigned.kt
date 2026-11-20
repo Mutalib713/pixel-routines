@@ -123,6 +123,8 @@ fun AssistantScreenRedesigned(
     onRejectDraft: (RoutineDraft) -> Unit,
     onEditDraft: (RoutineDraft) -> Unit,
     onOpenLens: () -> Unit,
+    openAttachSheet: Boolean = false,
+    onAttachSheetOpened: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -142,6 +144,11 @@ fun AssistantScreenRedesigned(
     var pendingFile by remember { mutableStateOf<PendingFile?>(null) }
 
     val messages = ChatSession.messages
+
+    // Arriving from "Scan / Image": open the add sheet straight away.
+    LaunchedEffect(openAttachSheet) {
+        if (openAttachSheet) { showAttachSheet = true; onAttachSheetOpened() }
+    }
 
     val suggestions = listOf(
         "Silence my phone in lectures at 8am on weekdays",

@@ -77,24 +77,28 @@ private fun AppRoot(tick: Int, refresh: () -> Unit) {
     var routines by remember { mutableStateOf(Store.load(ctx)) }
     val drafts = remember { mutableStateListOf<RoutineDraft>() }
     var showCreateOptions by remember { mutableStateOf(false) }
+    // "Scan / Image" opens the chat with its add sheet already up (layout L1).
+    var openAttach by remember { mutableStateOf(false) }
+    fun openPicture() { openAttach = true; screen = Screen.Assistant }
 
     fun reload() {
         routines = Store.load(ctx)
     }
 
+    // Tabs: Home · Routines · Controls · AI. Activity now lives inside Settings.
     val isTopLevel = screen is Screen.Home || screen is Screen.Routines ||
-        screen is Screen.Activity || screen is Screen.Assistant
+        screen is Screen.VolumePanelTriggers || screen is Screen.Assistant
 
     // Back button handling: returns smoothly to Home or previous screen
     BackHandler(enabled = screen !is Screen.Home && screen !is Screen.Onboarding) {
         screen = when (screen) {
             is Screen.Edit -> Screen.Routines
-            is Screen.VolumePanelTriggers -> Screen.Settings
+            is Screen.Activity -> Screen.Settings
+            is Screen.VolumePanelTriggers,
             is Screen.Discover,
             is Screen.Settings,
             is Screen.Lens,
             is Screen.Routines,
-            is Screen.Activity,
             is Screen.Assistant -> Screen.Home
             else -> Screen.Home
         }
@@ -117,10 +121,10 @@ private fun AppRoot(tick: Int, refresh: () -> Unit) {
                         label = { Text("Routines") },
                     )
                     NavigationBarItem(
-                        selected = screen is Screen.Activity,
-                        onClick = { screen = Screen.Activity },
-                        icon = { Icon(Icons.Filled.History, contentDescription = "Activity") },
-                        label = { Text("Activity") },
+                        selected = screen is Screen.VolumePanelTriggers,
+                        onClick = { screen = Screen.VolumePanelTriggers },
+                        icon = { Icon(Icons.Filled.Tune, contentDescription = "Controls") },
+                        label = { Text("Controls") },
                     )
                     NavigationBarItem(
                         selected = screen is Screen.Assistant,
@@ -143,7 +147,7 @@ private fun AppRoot(tick: Int, refresh: () -> Unit) {
                     tick = tick,
                     onNavigateToRoutines = { screen = Screen.Routines },
                     onNavigateToAi = { screen = Screen.Assistant },
-                    onNavigateToLens = { screen = Screen.Lens },
+                    onNavigateToLens = { openPicture() },
                     onNavigateToDiscover = { screen = Screen.Discover },
                     onNavigateToSettings = { screen = Screen.Settings },
                     onNavigateToActivity = { screen = Screen.Activity },
@@ -191,7 +195,7 @@ private fun AppRoot(tick: Int, refresh: () -> Unit) {
                     },
                 )
 
-                is Screen.Activity -> ActivityScreenRedesigned(tick = tick)
+                is Screen.Activity -> ActivityScreenRedesigned(tick = tick, onBack = { screen = Screen.Settings })
 
                 is Screen.Assistant -> AssistantScreenRedesigned(
                     drafts = drafts,
@@ -208,7 +212,9 @@ private fun AppRoot(tick: Int, refresh: () -> Unit) {
                     onEditDraft = { d ->
                         d.proposedRoutine?.let { screen = Screen.Edit(it) }
                     },
-                    onOpenLens = { screen = Screen.Lens },
+                    onOpenLens = { openPicture() },
+                    openAttachSheet = openAttach,
+                    onAttachSheetOpened = { openAttach = false },
                 )
 
                 is Screen.Discover -> DiscoverScreen(
@@ -221,12 +227,11 @@ private fun AppRoot(tick: Int, refresh: () -> Unit) {
                     tick = tick,
                     onBack = { screen = Screen.Home },
                     onNavigateToVolumeTriggers = { screen = Screen.VolumePanelTriggers },
+                    onNavigateToActivity = { screen = Screen.Activity },
                 )
 
-                is Screen.VolumePanelTriggers -> VolumePanelSettingsScreen(
-                    tick = tick,
-                    onBack = { screen = Screen.Settings },
-                )
+                // A tab now, so no back arrow.
+                is Screen.VolumePanelTriggers -> VolumePanelSettingsScreen(tick = tick, onBack = null)
 
                 is Screen.Lens -> RoutineLensScreen(
                     onBack = { screen = Screen.Home },
@@ -250,7 +255,7 @@ private fun AppRoot(tick: Int, refresh: () -> Unit) {
         CreateRoutineOptionsSheet(
             onDismiss = { showCreateOptions = false },
             onChatWithAi = { screen = Screen.Assistant },
-            onFromImage = { screen = Screen.Lens },
+            onFromImage = { openPicture() },
             onManualSetup = { screen = Screen.Edit(Routine.new()) },
             onUseTemplate = { screen = Screen.Discover },
         )

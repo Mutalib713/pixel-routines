@@ -1,41 +1,54 @@
 package com.mosman.routines.ui.home
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Lightbulb
+import androidx.compose.material.icons.outlined.PauseCircle
+import androidx.compose.material.icons.outlined.PhotoCamera
+import androidx.compose.material.icons.outlined.PlayCircle
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.mosman.routines.Engine
 import com.mosman.routines.Ic
-import com.mosman.routines.LogEntry
-import com.mosman.routines.Permissions
 import com.mosman.routines.Routine
-import com.mosman.routines.RunLog
 import com.mosman.routines.Store
-import com.mosman.routines.ui.components.RoutineCardRedesigned
-import kotlinx.coroutines.launch
 import java.time.Duration
 import java.time.LocalTime
 import java.time.ZonedDateTime
 import java.time.format.TextStyle
 import java.util.Locale
+
+/**
+ * Home, layout A (picked by Mutalib 2026-11-20) plus the quick actions he asked to keep:
+ * the next run is the biggest thing on screen, asking the assistant is one bar, and routines
+ * are plain rows with a switch. Colours come only from the Material You scheme.
+ */
+private object Sp {
+    val xs = 4.dp; val s = 8.dp; val m = 12.dp; val l = 16.dp; val xl = 20.dp; val xxl = 28.dp
+}
+private object Shp {
+    val pill = RoundedCornerShape(28.dp)
+    val hero = RoundedCornerShape(28.dp)
+    val tile = RoundedCornerShape(20.dp)
+    val icon = RoundedCornerShape(12.dp)
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -56,507 +69,232 @@ fun HomeScreenRedesigned(
     modifier: Modifier = Modifier,
 ) {
     val ctx = LocalContext.current
-    val snackbar = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
-
-    val activeIds = remember(tick, routines) { Store.activeIds(ctx) }
+    val running = remember(tick, routines) { Store.activeIds(ctx) }
     var paused by remember(tick) { mutableStateOf(Store.isPaused(ctx)) }
-    val recentRuns = remember(tick) { RunLog.load(ctx).take(3) }
 
-    // Dynamic greeting based on time of day
-    val greeting = remember {
-        val hour = LocalTime.now().hour
-        when {
-            hour < 12 -> "Good morning"
-            hour < 17 -> "Good afternoon"
-            else -> "Good evening"
-        }
+    val greeting = remember(tick) {
+        val h = LocalTime.now().hour
+        when { h < 12 -> "Good morning"; h < 17 -> "Good afternoon"; else -> "Good evening" }
+    }
+    val next = remember(routines, tick) {
+        routines.filter { it.enabled }.mapNotNull { r -> r.nextRun()?.let { r to it } }.minByOrNull { it.second }
+    }
+    // On first, then by when they next run, then by name.
+    val sorted = remember(routines, tick) {
+        routines.sortedWith(compareByDescending<Routine> { it.enabled }
+            .thenBy { it.nextRun()?.toEpochSecond() ?: Long.MAX_VALUE }
+            .thenBy { it.name.lowercase() })
     }
 
-    // Active routines count & Next scheduled routine calculation
-    val enabledRoutines = remember(routines) { routines.filter { it.enabled } }
-    val nextUpcoming = remember(enabledRoutines, tick) {
-        enabledRoutines
-            .mapNotNull { r -> r.nextRun()?.let { next -> r to next } }
-            .minByOrNull { it.second }
-    }
-
-    Scaffold(
-        snackbarHost = { SnackbarHost(snackbar) },
-        topBar = {
-            TopAppBar(
-                title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                Icons.Filled.AutoAwesome,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp),
-                            )
-                        }
-                        Spacer(Modifier.width(10.dp))
-                        Text(
-                            text = "Pixel Routines",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 20.sp,
-                        )
-                    }
-                },
-                actions = {
-                    IconButton(onClick = onNavigateToSettings) {
-                        Icon(Icons.Filled.Settings, contentDescription = "Settings")
-                    }
-                },
-            )
-        },
-    ) { pad ->
-        LazyColumn(
-            modifier = modifier
-                .fillMaxSize()
-                .padding(pad),
-            contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 8.dp, bottom = 96.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            // User Greeting Header
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            text = "$greeting, Mutalib",
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Spacer(Modifier.height(2.dp))
-                        Text(
-                            text = if (paused) "All automations are currently paused"
-                            else "Your routines are keeping you on track.",
-                            fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primaryContainer)
-                            .clickable { onNavigateToSettings() },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            text = "M",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 18.sp,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        )
-                    }
-                }
-            }
-
-            // Paused Alert Banner
-            if (paused) {
-                item {
-                    Card(
-                        shape = RoundedCornerShape(18.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.errorContainer,
-                        ),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Row(
-                            Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(
-                                Icons.Filled.PauseCircle,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onErrorContainer,
-                            )
-                            Spacer(Modifier.width(12.dp))
-                            Text(
-                                text = "Automations paused",
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 14.sp,
-                                modifier = Modifier.weight(1f),
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                            )
-                            Button(
-                                onClick = {
-                                    Store.setPaused(ctx, false)
-                                    paused = false
-                                },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.error,
-                                ),
-                                shape = RoundedCornerShape(12.dp),
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                            ) {
-                                Text("Resume", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Active Summary Banner (Matching Screen 1)
-            item {
-                ActiveSummaryBanner(
-                    activeCount = enabledRoutines.size,
-                    runningCount = activeIds.size,
-                    nextRoutine = nextUpcoming?.first?.name,
-                    nextTime = nextUpcoming?.second,
-                    onClick = onNavigateToRoutines,
-                )
-            }
-
-            // Quick Actions 4-Grid
-            item {
-                Text(
-                    text = "Quick Actions",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-                Spacer(Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    QuickActionTile(
-                        title = "Create\nRoutine",
-                        icon = Icons.Filled.Add,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.weight(1f),
-                        onClick = onOpenCreateOptions,
-                    )
-                    QuickActionTile(
-                        title = "Routine\nAI",
-                        icon = Icons.Filled.AutoAwesome,
-                        tint = Color(0xFF8B5CF6),
-                        modifier = Modifier.weight(1f),
-                        onClick = onNavigateToAi,
-                    )
-                    QuickActionTile(
-                        title = "Scan /\nImage",
-                        icon = Icons.Filled.CameraAlt,
-                        tint = Color(0xFF10B981),
-                        modifier = Modifier.weight(1f),
-                        onClick = onNavigateToLens,
-                    )
-                    QuickActionTile(
-                        title = "Browse\nIdeas",
-                        icon = Icons.Filled.Lightbulb,
-                        tint = Color(0xFFF59E0B),
-                        modifier = Modifier.weight(1f),
-                        onClick = onNavigateToDiscover,
-                    )
-                }
-            }
-
-            // Upcoming Routines Section
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = "Upcoming",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.weight(1f),
-                    )
-                    TextButton(onClick = onNavigateToRoutines) {
-                        Text("See all", fontWeight = FontWeight.SemiBold)
-                    }
-                }
-            }
-
-            if (routines.isEmpty()) {
-                item {
-                    Card(
-                        shape = RoundedCornerShape(20.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        ),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Column(
-                            Modifier.padding(24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                        ) {
-                            Icon(
-                                Icons.Filled.Schedule,
-                                contentDescription = null,
-                                modifier = Modifier.size(36.dp),
-                                tint = MaterialTheme.colorScheme.primary,
-                            )
-                            Spacer(Modifier.height(8.dp))
-                            Text("No routines yet", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                "Create your first routine or choose a template to automate your day.",
-                                fontSize = 13.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Spacer(Modifier.height(14.dp))
-                            FilledTonalButton(onClick = onOpenCreateOptions) {
-                                Icon(Icons.Filled.Add, null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("Create routine")
-                            }
-                        }
-                    }
-                }
-            } else {
-                // Show up to 3 upcoming routines
-                val topUpcoming = routines.take(3)
-                items(topUpcoming.size) { idx ->
-                    val r = topUpcoming[idx]
-                    RoutineCardRedesigned(
-                        routine = r,
-                        isRunning = activeIds.contains(r.id),
-                        onClick = { onOpenRoutine(r) },
-                        onToggle = { onToggleRoutine(r, it) },
-                        onRunNow = {
-                            scope.launch { snackbar.showSnackbar("Running “${r.name}”…") }
-                            Engine.runNow(ctx, r) { res ->
-                                scope.launch {
-                                    snackbar.showSnackbar(
-                                        if (res.isEmpty()) "Executed successfully"
-                                        else res.joinToString(" · "),
-                                    )
-                                }
-                            }
-                        },
-                        onEdit = { onOpenRoutine(r) },
-                        onDuplicate = { onDuplicateRoutine(r) },
-                        onDelete = { onDeleteRoutine(r) },
-                    )
-                }
-            }
-
-            // Recent Activity Section
-            if (recentRuns.isNotEmpty()) {
-                item {
-                    Spacer(Modifier.height(4.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = "Recent Activity",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.weight(1f),
-                        )
-                        TextButton(onClick = onNavigateToActivity) {
-                            Text("History", fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                }
-
-                items(recentRuns.size) { idx ->
-                    val entry = recentRuns[idx]
-                    RecentActivityRow(entry)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ActiveSummaryBanner(
-    activeCount: Int,
-    runningCount: Int,
-    nextRoutine: String?,
-    nextTime: ZonedDateTime?,
-    onClick: () -> Unit,
-) {
-    val emerald = Color(0xFF10B981)
-    val emeraldContainer = Color(0xFFD1FAE5)
-
-    Card(
-        onClick = onClick,
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = emeraldContainer.copy(alpha = 0.35f),
-        ),
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(
-                width = 1.dp,
-                color = emerald.copy(alpha = 0.3f),
-                shape = RoundedCornerShape(20.dp),
-            ),
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = Sp.l, end = Sp.l, top = Sp.s, bottom = Sp.xxl),
+        verticalArrangement = Arrangement.spacedBy(Sp.m),
     ) {
-        Row(
-            Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                Modifier
-                    .size(42.dp)
-                    .clip(CircleShape)
-                    .background(emerald.copy(alpha = 0.18f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Filled.Schedule,
-                    contentDescription = null,
-                    tint = emerald,
-                    modifier = Modifier.size(22.dp),
-                )
-            }
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "$activeCount routines active" + (if (runningCount > 0) " · $runningCount running" else ""),
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp,
+                    "$greeting, Mutalib",
+                    style = MaterialTheme.typography.headlineSmall,
+                    modifier = Modifier.weight(1f).semantics { heading() },
                 )
-                Spacer(Modifier.height(2.dp))
-                if (nextRoutine != null && nextTime != null) {
-                    val d = Duration.between(ZonedDateTime.now(), nextTime)
-                    val rel = when {
-                        d.toDays() > 0 -> "${d.toDays()}d ${d.toHours() % 24}h"
-                        d.toHours() > 0 -> "${d.toHours()}h ${d.toMinutes() % 60}m"
-                        else -> "${maxOf(d.toMinutes(), 1)} min"
-                    }
-                    Text(
-                        text = "Next: $nextRoutine in $rel",
-                        fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    Text(
-                        text = "No upcoming scheduled events",
-                        fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                IconButton(onClick = onNavigateToSettings) {
+                    Icon(Icons.Outlined.Settings, contentDescription = "Settings")
                 }
             }
-            Icon(
-                Icons.AutoMirrored.Filled.ArrowForwardIos,
-                contentDescription = null,
-                modifier = Modifier.size(14.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        }
+
+        item {
+            Surface(onClick = onNavigateToAi, shape = Shp.pill, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                Row(Modifier.fillMaxWidth().padding(start = Sp.l, end = Sp.xs).heightIn(min = 52.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(Sp.m))
+                    Text("Ask Routine AI", style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                    IconButton(onClick = onNavigateToLens) {
+                        Icon(Icons.Outlined.PhotoCamera, contentDescription = "Make a routine from a picture")
+                    }
+                }
+            }
+        }
+
+        item {
+            NextUpCard(
+                paused = paused,
+                next = next,
+                anyOn = routines.any { it.enabled },
+                hasRoutines = routines.isNotEmpty(),
+                onResume = { Store.setPaused(ctx, false); paused = false },
+                onOpen = { next?.first?.let(onOpenRoutine) },
             )
         }
-    }
-}
 
-@Composable
-private fun QuickActionTile(
-    title: String,
-    icon: ImageVector,
-    tint: Color,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Card(
-        onClick = onClick,
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-        ),
-        modifier = modifier
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                shape = RoundedCornerShape(18.dp),
-            ),
-    ) {
-        Column(
-            modifier = Modifier
-                .padding(vertical = 14.dp, horizontal = 10.dp)
-                .fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Box(
-                Modifier
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .background(tint.copy(alpha = 0.15f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(Sp.s)) {
+                QuickAction(Icons.Outlined.Add, "New routine", Modifier.weight(1f), onOpenCreateOptions)
+                QuickAction(Icons.Outlined.PhotoCamera, "From a picture", Modifier.weight(1f), onNavigateToLens)
+                QuickAction(Icons.Outlined.Lightbulb, "Ideas", Modifier.weight(1f), onNavigateToDiscover)
+                QuickAction(
+                    if (paused) Icons.Outlined.PlayCircle else Icons.Outlined.PauseCircle,
+                    if (paused) "Resume all" else "Pause all",
+                    Modifier.weight(1f),
+                ) {
+                    Store.setPaused(ctx, !paused); paused = !paused
+                }
             }
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = title,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                lineHeight = 15.sp,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            )
         }
-    }
-}
 
-@Composable
-private fun RecentActivityRow(entry: LogEntry) {
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-        ),
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
-                shape = RoundedCornerShape(16.dp),
-            ),
-    ) {
-        Row(
-            Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                Modifier
-                    .size(34.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primaryContainer),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Ic.of(entry.icon),
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
+        item {
+            Row(Modifier.padding(top = Sp.s), verticalAlignment = Alignment.CenterVertically) {
+                Text("Your routines", style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f).semantics { heading() })
+                if (routines.size > 5) TextButton(onClick = onNavigateToRoutines) { Text("See all ${routines.size}") }
             }
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
+        }
+
+        if (routines.isEmpty()) {
+            item {
                 Text(
-                    text = entry.name,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = entry.results.joinToString(" · ").ifBlank { "Executed successfully" },
-                    fontSize = 12.sp,
+                    "Nothing yet. Make one yourself, start from an idea, or just tell Routine AI what you want.",
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
                 )
             }
-            Icon(
-                Icons.Filled.CheckCircle,
-                contentDescription = null,
-                tint = Color(0xFF10B981),
-                modifier = Modifier.size(18.dp),
+        } else {
+            items(sorted.take(5), key = { it.id }) { r ->
+                RoutineRow(r, isRunning = r.id in running, onOpen = { onOpenRoutine(r) }, onToggle = { onToggleRoutine(r, it) })
+            }
+        }
+    }
+}
+
+@Composable
+private fun NextUpCard(
+    paused: Boolean,
+    next: Pair<Routine, ZonedDateTime>?,
+    anyOn: Boolean,
+    hasRoutines: Boolean,
+    onResume: () -> Unit,
+    onOpen: () -> Unit,
+) {
+    Surface(
+        onClick = onOpen,
+        enabled = next != null && !paused,
+        shape = Shp.hero,
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+    ) {
+        Column(Modifier.fillMaxWidth().padding(Sp.xl)) {
+            Text(
+                if (paused) "PAUSED" else "NEXT UP",
+                style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.height(Sp.xs))
+            when {
+                paused -> {
+                    Text("All routines are paused", style = MaterialTheme.typography.headlineSmall)
+                    Text("Nothing runs until you resume.", style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(Sp.m))
+                    Button(onClick = onResume) { Text("Resume") }
+                }
+                next != null -> {
+                    val (r, at) = next
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text("%02d:%02d".format(at.hour, at.minute), style = MaterialTheme.typography.displayMedium)
+                        Spacer(Modifier.width(Sp.s))
+                        Text(dayLabel(at), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = Sp.s))
+                    }
+                    Text(r.name, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        r.actions.joinToString(", ") { it.describe() } +
+                            (r.endTriggers.firstOrNull()?.let { " · until ${it.describe().removePrefix("At ")}" } ?: ""),
+                        style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(inHowLong(at), style = MaterialTheme.typography.bodySmall)
+                }
+                anyOn -> {
+                    Text("Waiting for a trigger", style = MaterialTheme.typography.headlineSmall)
+                    Text("Your routines that are on run when their moment comes, like plugging in the charger.",
+                        style = MaterialTheme.typography.bodyMedium)
+                }
+                hasRoutines -> {
+                    Text("Nothing is switched on", style = MaterialTheme.typography.headlineSmall)
+                    Text("Turn a routine on below and its next run shows here.", style = MaterialTheme.typography.bodyMedium)
+                }
+                else -> {
+                    Text("No routines yet", style = MaterialTheme.typography.headlineSmall)
+                    Text("Your next run shows here once you've made one.", style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        }
+    }
+}
+
+private fun dayLabel(at: ZonedDateTime): String {
+    val today = ZonedDateTime.now().toLocalDate()
+    return when (at.toLocalDate()) {
+        today -> "today"
+        today.plusDays(1) -> "tomorrow"
+        else -> at.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.ENGLISH)
+    }
+}
+
+private fun inHowLong(at: ZonedDateTime): String {
+    val d = Duration.between(ZonedDateTime.now(), at)
+    val h = d.toHours(); val m = d.toMinutes() % 60
+    return when {
+        d.isNegative -> "now"
+        h >= 24 -> "in ${h / 24} day${if (h / 24 == 1L) "" else "s"}"
+        h > 0 -> "in $h h ${m} min"
+        else -> "in $m min"
+    }
+}
+
+@Composable
+private fun QuickAction(icon: ImageVector, label: String, modifier: Modifier, onClick: () -> Unit) {
+    Surface(onClick = onClick, shape = Shp.tile, color = MaterialTheme.colorScheme.surfaceContainer, modifier = modifier) {
+        Column(
+            Modifier.padding(vertical = Sp.m, horizontal = Sp.xs).heightIn(min = 64.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.height(Sp.xs))
+            Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+@Composable
+private fun RoutineRow(r: Routine, isRunning: Boolean, onOpen: () -> Unit, onToggle: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(Shp.tile).clickable(onClick = onOpen).padding(vertical = Sp.s, horizontal = Sp.xs),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(44.dp).clip(Shp.icon).background(MaterialTheme.colorScheme.secondaryContainer),
+            contentAlignment = Alignment.Center,
+        ) { Icon(Ic.of(r.icon), contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer) }
+        Spacer(Modifier.width(Sp.m))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(r.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false))
+                if (isRunning) {
+                    Spacer(Modifier.width(Sp.s))
+                    Text("Running", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                }
+            }
+            Text(
+                (r.triggers.firstOrNull()?.describe() ?: "No trigger") +
+                    (if (r.triggers.size > 1) " (+${r.triggers.size - 1})" else "") +
+                    " → " + r.actions.joinToString(", ") { it.describe() },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
         }
+        Spacer(Modifier.width(Sp.s))
+        Switch(checked = r.enabled, onCheckedChange = onToggle)
     }
 }

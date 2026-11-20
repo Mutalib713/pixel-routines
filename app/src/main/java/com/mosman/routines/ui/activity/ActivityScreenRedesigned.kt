@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Error
@@ -45,6 +46,7 @@ enum class ActivityTab {
 @Composable
 fun ActivityScreenRedesigned(
     tick: Int,
+    onBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val ctx = LocalContext.current
@@ -67,6 +69,11 @@ fun ActivityScreenRedesigned(
         topBar = {
             TopAppBar(
                 title = { Text("Activity", fontWeight = FontWeight.Bold) },
+                navigationIcon = {
+                    if (onBack != null) IconButton(onClick = onBack) {
+                        Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
                 actions = {
                     if (entries.isNotEmpty()) {
                         IconButton(onClick = { showClearDialog = true }) {

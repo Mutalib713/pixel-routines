@@ -33,7 +33,7 @@ import kotlin.math.roundToInt
 @Composable
 fun VolumePanelSettingsScreen(
     tick: Int,
-    onBack: () -> Unit,
+    onBack: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     val ctx = LocalContext.current
@@ -56,9 +56,9 @@ fun VolumePanelSettingsScreen(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
-                title = { Text("Volume Panel Triggers", fontWeight = FontWeight.Bold) },
+                title = { Text("Controls", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    if (onBack != null) IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
