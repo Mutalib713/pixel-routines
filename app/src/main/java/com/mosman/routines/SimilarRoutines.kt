@@ -66,6 +66,13 @@ object SimilarRoutines {
         is Action.Dnd -> "Do Not Disturb"
         is Action.Volume -> "${a.stream.label().lowercase()} volume"
         is Action.Brightness -> "brightness"
+        is Action.DarkTheme -> "dark theme"
+        is Action.BatterySaver -> "Battery Saver"
+        is Action.AutoRotate -> "auto-rotate"
+        is Action.Flashlight -> "the flashlight"
+        is Action.WifiToggle -> "Wi-Fi"
+        is Action.BluetoothToggle -> "Bluetooth"
+        is Action.AirplaneToggle -> "airplane mode"
         else -> "“${a.describe()}”"
     }
 

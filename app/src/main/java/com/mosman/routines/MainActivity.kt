@@ -44,7 +44,7 @@ sealed interface Screen {
     data object Discover : Screen
     data object Settings : Screen
     data object VolumePanelTriggers : Screen
-    data class Edit(val routine: Routine) : Screen
+    data class Edit(val routine: Routine, val back: Screen = Routines) : Screen
 }
 
 class MainActivity : ComponentActivity() {
@@ -91,7 +91,7 @@ private fun AppRoot(tick: Int, refresh: () -> Unit) {
     // Back button handling: returns smoothly to Home or previous screen
     BackHandler(enabled = screen !is Screen.Home && screen !is Screen.Onboarding) {
         screen = when (screen) {
-            is Screen.Edit -> Screen.Routines
+            is Screen.Edit -> (screen as Screen.Edit).back
             is Screen.Activity -> Screen.Settings
             is Screen.VolumePanelTriggers,
             is Screen.Discover,
@@ -150,7 +150,7 @@ private fun AppRoot(tick: Int, refresh: () -> Unit) {
                     onNavigateToSettings = { screen = Screen.Settings },
                     onNavigateToActivity = { screen = Screen.Activity },
                     onOpenCreateOptions = { showCreateOptions = true },
-                    onOpenRoutine = { screen = Screen.Edit(it) },
+                    onOpenRoutine = { screen = Screen.Edit(it, back = Screen.Home) },
                     onToggleRoutine = { r, on -> Store.setEnabled(ctx, r.id, on); reload() },
                     onDuplicateRoutine = { r ->
                         val copy = r.copy(id = System.currentTimeMillis(), name = "${r.name} (Copy)")
@@ -164,7 +164,7 @@ private fun AppRoot(tick: Int, refresh: () -> Unit) {
                     routines = routines,
                     drafts = drafts,
                     tick = tick,
-                    onOpenRoutine = { screen = Screen.Edit(it) },
+                    onOpenRoutine = { screen = Screen.Edit(it, back = Screen.Routines) },
                     onToggleRoutine = { r, on -> Store.setEnabled(ctx, r.id, on); reload() },
                     onDuplicateRoutine = { r ->
                         val copy = r.copy(id = System.currentTimeMillis(), name = "${r.name} (Copy)")
@@ -208,7 +208,7 @@ private fun AppRoot(tick: Int, refresh: () -> Unit) {
                         drafts.remove(d)
                     },
                     onEditDraft = { d ->
-                        d.proposedRoutine?.let { screen = Screen.Edit(it) }
+                        d.proposedRoutine?.let { screen = Screen.Edit(it, back = Screen.Assistant) }
                     },
                     onOpenLens = { openPicture() },
                     openAttachSheet = openAttach,
@@ -217,8 +217,9 @@ private fun AppRoot(tick: Int, refresh: () -> Unit) {
 
                 is Screen.Discover -> DiscoverScreen(
                     onBack = { screen = Screen.Home },
-                    onPick = { built -> Store.upsert(ctx, built); reload(); screen = Screen.Edit(built) },
-                    onScratch = { screen = Screen.Edit(Routine.new()) },
+                    // Used to save the idea the moment it was tapped, so backing out still left it saved.
+                    onPick = { built -> screen = Screen.Edit(built, back = Screen.Discover) },
+                    onScratch = { screen = Screen.Edit(Routine.new(), back = Screen.Discover) },
                 )
 
                 is Screen.Settings -> SettingsScreenRedesigned(
@@ -235,7 +236,7 @@ private fun AppRoot(tick: Int, refresh: () -> Unit) {
                     initial = s.routine,
                     onSave = { r -> Store.upsert(ctx, r); reload(); screen = Screen.Routines },
                     onDelete = { r -> pendingDelete = r },
-                    onBack = { screen = Screen.Routines },
+                    onBack = { screen = s.back },
                 )
             }
         }
@@ -266,7 +267,7 @@ private fun AppRoot(tick: Int, refresh: () -> Unit) {
             onDismiss = { showCreateOptions = false },
             onChatWithAi = { screen = Screen.Assistant },
             onFromImage = { openPicture() },
-            onManualSetup = { screen = Screen.Edit(Routine.new()) },
+            onManualSetup = { val from = screen; screen = Screen.Edit(Routine.new(), back = from) },
             onUseTemplate = { screen = Screen.Discover },
         )
     }
