@@ -134,10 +134,20 @@ object RoutineAIParser {
     }
 
     /** Information questions. ("Can you mute my phone at 10pm?" is a request, not one of these.) */
-    private val QUESTION = Regex("^(what|what's|whats|why|how|which|when|explain|describe|tell me about|is|are|does|did)\\b")
+    private val QUESTION = Regex("^(what|what's|whats|why|how|which|explain|describe|tell me about)\\b")
+
+    /**
+     * Words that also start requests, so they only count as a question with a "?".
+     * Found on the Pixel 2026-11-20: "When I plug in my charger at night turn on dark mode and set
+     * media volume to 20 percent" was read as a question and answered by describing the
+     * unrelated routine called "volume".
+     */
+    private val MAYBE_QUESTION = Regex("^(when|is|are|does|did|do)\\b")
 
     private fun question(lower: String, saved: List<Routine>): ParsedAIResponse? {
-        if (!QUESTION.containsMatchIn(lower)) return null
+        val isQuestion = QUESTION.containsMatchIn(lower) ||
+            (MAYBE_QUESTION.containsMatchIn(lower) && lower.endsWith("?"))
+        if (!isQuestion) return null
         val r = findRoutine(lower, saved, strict = false)
             ?: return ParsedAIResponse(
                 "Offline, I can only explain the routines you've saved, by name. ${routineList(saved)} " +

@@ -76,6 +76,26 @@ class RoutineAIParserTest {
         assertTrue(r.explanation, r.explanation.contains("aver", ignoreCase = true))
     }
 
+    @Test fun whenSentence_isARequest_notAQuestionAboutARoutine() {
+        // His exact message on the Pixel; he has a saved routine literally called "volume".
+        val volume = Routine(id = 15, name = "volume",
+            triggers = listOf(Trigger.Gesture(com.mosman.routines.GestureType.SHAKE)),
+            actions = listOf(Action.Volume(com.mosman.routines.StreamType.RING, 60)))
+        val r = RoutineAIParser.parse(
+            "when I plug in my charger at night turn in dark mode and set media volume to 20.percent",
+            saved = listOf(volume),
+        )
+        assertFalse("must not describe the 'volume' routine: ${r.explanation}", r.explanation.contains("is paused") || r.explanation.contains("switched on"))
+        // The offline assistant has no charger rule, so it must hand this to Gemini in Automatic mode.
+        assertFalse(r.handled)
+    }
+
+    @Test fun whenQuestionWithAQuestionMark_stillExplains() {
+        val r = RoutineAIParser.parse("When does Night Routine run?", saved = saved)
+        assertNull(r.draft)
+        assertTrue(r.explanation, r.explanation.contains("22:00"))
+    }
+
     @Test fun question_aboutUnknownRoutine_doesNotCrashOrCreate() {
         val r = RoutineAIParser.parse("What does Battery Saver do?", saved = emptyList())
         assertNull(r.draft)
