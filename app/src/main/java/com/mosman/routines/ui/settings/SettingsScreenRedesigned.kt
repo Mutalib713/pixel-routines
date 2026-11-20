@@ -273,7 +273,7 @@ private fun LazyListScope.mainPage(
     }
     item {
         Group {
-            SwitchRow(Icons.Outlined.PauseCircle, "Pause all routines", "Nothing runs until you switch this off", paused, onPause)
+            SwitchRow(Icons.Outlined.PauseCircle, "Pause all routines", "Running routines stop and put things back. Nothing starts until you switch this off.", paused, onPause)
         }
     }
     item {

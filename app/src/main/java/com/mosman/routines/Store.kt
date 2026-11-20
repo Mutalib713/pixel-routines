@@ -73,7 +73,22 @@ object Store {
     fun isPaused(ctx: Context) = appPrefs(ctx).getBoolean("paused", false)
     fun setPaused(ctx: Context, paused: Boolean) {
         appPrefs(ctx).edit().putBoolean("paused", paused).apply()
+        // Pausing used to only stop routines STARTING, so one already running (Lecture Mode
+        // holding the phone on Vibrate) carried on and "Pause all" looked broken. Now pausing
+        // ends whatever is running and puts its settings back.
+        if (paused) {
+            val all = load(ctx).associateBy { it.id }
+            activeIds(ctx).forEach { id ->
+                val r = all[id]
+                if (r != null) Engine.endRoutine(ctx, r) else setActive(ctx, id, false)
+            }
+        }
         RoutinesWidget.refresh(ctx)
+        // Keep the Quick Settings tile in step when pausing from inside the app.
+        runCatching {
+            android.service.quicksettings.TileService.requestListeningState(
+                ctx, android.content.ComponentName(ctx, RoutinesTile::class.java))
+        }
     }
 
     // ---- Export / import (share your routines with friends) ----
