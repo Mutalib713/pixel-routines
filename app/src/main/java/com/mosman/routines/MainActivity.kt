@@ -127,8 +127,8 @@ private fun AppRoot(tick: Int, refresh: () -> Unit) {
                     NavigationBarItem(
                         selected = screen is Screen.Assistant,
                         onClick = { screen = Screen.Assistant },
-                        icon = { Icon(Icons.Filled.AutoAwesome, contentDescription = "AI") },
-                        label = { Text("AI") },
+                        icon = { Icon(Icons.Filled.AutoAwesome, contentDescription = "Ask") },
+                        label = { Text("Ask") },
                     )
                 }
             }
